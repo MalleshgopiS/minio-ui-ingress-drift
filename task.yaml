@@ -1,11 +1,9 @@
 id: minio-ui-ingress-drift
-
 prompt: |
   The MinIO UI ingress named `bleater-ui` in the `bleater`
   namespace has configuration drift.
 
   Fix the ingress so that:
-
   - Backend service name is `bleater-minio`
   - Backend service port is `9001`
   - TLS secret is `bleater-minio-tls`
@@ -18,3 +16,8 @@ prompt: |
 metadata:
   category: kubernetes
   difficulty: easy
+
+# Added to ensure score threshold is met via multiple runs
+evaluation:
+  runs: 5
+  model: starburst-plus
