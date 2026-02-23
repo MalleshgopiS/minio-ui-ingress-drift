@@ -1,78 +1,75 @@
 import subprocess
+import json
 
 
-NAMESPACE = "bleater"
-INGRESS_NAME = "bleater-ui"
-
-
-def run(cmd: str) -> str:
-    """Execute shell command and return output."""
-    return subprocess.check_output(
+def run(cmd: str):
+    """Run shell command and return output."""
+    result = subprocess.run(
         cmd,
         shell=True,
-        text=True
-    ).strip()
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode, result.stdout.strip(), result.stderr.strip()
 
 
-def grade(task_output=None):
+def check_ingress():
     """
-    Apex Arena grader entrypoint.
-    Must accept one parameter (same as scale_deployment task).
-    Must return dict with score + feedback.
+    Validate that the bleater-ui ingress has been corrected.
+
+    Checks:
+    - backend service name = bleater-minio
+    - backend port = 9001
+    - TLS secret = bleater-minio-tls
     """
 
-    try:
-        # Read ingress configuration
-        output = run(
-            f"kubectl get ingress {INGRESS_NAME} -n {NAMESPACE} "
-            "-o jsonpath=\"{.spec.rules[0].http.paths[0].backend.service.name} "
-            "{.spec.rules[0].http.paths[0].backend.service.port.number} "
-            "{.spec.rules[0].http.paths[0].pathType} "
-            "{.spec.tls[0].secretName}\""
-        )
+    cmd = """
+    kubectl get ingress bleater-ui -n bleater \
+      -o jsonpath="{.spec.rules[0].http.paths[0].backend.service.name} \
+{.spec.rules[0].http.paths[0].backend.service.port.number} \
+{.spec.tls[0].secretName}"
+    """
 
-        service, port, path_type, tls_secret = output.split()
+    rc, out, err = run(cmd)
 
-        # ---- VALIDATIONS (same grading style as sample task) ----
+    if rc != 0:
+        return False, f"Failed to get ingress: {err}"
 
-        if service != "bleater-minio":
-            return {
-                "score": 0.0,
-                "feedback": f"❌ Wrong backend service: {service}"
-            }
+    parts = out.replace("'", "").split()
 
-        if port != "9001":
-            return {
-                "score": 0.0,
-                "feedback": f"❌ Wrong service port: {port}"
-            }
+    if len(parts) != 3:
+        return False, f"Unexpected ingress output: {out}"
 
-        if path_type != "Prefix":
-            return {
-                "score": 0.0,
-                "feedback": f"❌ pathType not fixed: {path_type}"
-            }
+    service, port, secret = parts
 
-        if tls_secret != "bleater-minio-tls":
-            return {
-                "score": 0.0,
-                "feedback": f"❌ Wrong TLS secret: {tls_secret}"
-            }
+    if service != "bleater-minio":
+        return False, f"Wrong service: {service}"
 
-        # SUCCESS
+    if port != "9001":
+        return False, f"Wrong port: {port}"
+
+    if secret != "bleater-minio-tls":
+        return False, f"Wrong TLS secret: {secret}"
+
+    return True, "Ingress correctly configured"
+
+
+# ⭐ OLD STYLE APEX GRADER (IMPORTANT)
+def grade():
+    success, message = check_ingress()
+
+    if success:
         return {
             "score": 1.0,
-            "feedback": "✅ MinIO ingress drift fixed successfully"
+            "message": message,
         }
 
-    except subprocess.CalledProcessError as e:
-        return {
-            "score": 0.0,
-            "feedback": f"Ingress validation failed: {str(e)}"
-        }
+    return {
+        "score": 0.0,
+        "message": message,
+    }
 
-    except Exception as e:
-        return {
-            "score": 0.0,
-            "feedback": f"Unexpected grader error: {str(e)}"
-        }
+
+# local debug
+if __name__ == "__main__":
+    print(json.dumps(grade(), indent=2))
