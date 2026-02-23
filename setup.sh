@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 set -e
 
-echo "Creating drifted MinIO ingress..."
-
 kubectl apply -f - <<EOF
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -10,7 +8,6 @@ metadata:
   name: bleater-ui
   namespace: bleater
 spec:
-  ingressClassName: nginx
   rules:
   - host: minio.devops.local
     http:
@@ -19,13 +16,11 @@ spec:
         pathType: Prefix
         backend:
           service:
-            name: WRONG-SERVICE
+            name: wrong-service
             port:
               number: 80
   tls:
   - hosts:
     - minio.devops.local
-    secretName: WRONG-TLS
+    secretName: wrong-secret
 EOF
-
-echo "Drifted ingress created."

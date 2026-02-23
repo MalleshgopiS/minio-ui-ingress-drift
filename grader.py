@@ -10,21 +10,34 @@ def run(cmd):
 
 def check_ingress():
     """
-    Validate that the bleater-ui ingress has been corrected.
+    Validate the bleater-ui ingress configuration.
 
     Checks:
     - backend service name
     - backend port
     - TLS secret name
+    - host value
     """
 
-    cmd = """kubectl get ingress bleater-ui -n bleater -o jsonpath='{.spec.rules[0].http.paths[0].backend.service.name} {.spec.rules[0].http.paths[0].backend.service.port.number} {.spec.tls[0].secretName}'"""
+    cmd = """
+    kubectl get ingress bleater-ui -n bleater \
+    -o jsonpath='{.spec.rules[0].host} {.spec.rules[0].http.paths[0].backend.service.name} {.spec.rules[0].http.paths[0].backend.service.port.number} {.spec.tls[0].secretName}'
+    """
+
     code, out = run(cmd)
 
     if code != 0:
         return False, "Ingress not found"
 
-    service, port, secret = out.replace("'", "").split()
+    parts = out.replace("'", "").split()
+
+    if len(parts) != 4:
+        return False, f"Unexpected output: {out}"
+
+    host, service, port, secret = parts
+
+    if host != "minio.devops.local":
+        return False, f"Wrong host: {host}"
 
     if service != "bleater-minio":
         return False, f"Wrong service: {service}"
