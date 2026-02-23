@@ -3,20 +3,17 @@ import subprocess
 
 def run(cmd):
     result = subprocess.run(
-        cmd, shell=True, capture_output=True, text=True
+        cmd,
+        shell=True,
+        capture_output=True,
+        text=True,
     )
     return result.returncode, result.stdout.strip()
 
 
 def check_ingress():
     """
-    Validate the bleater-ui ingress configuration.
-
-    Checks:
-    - backend service name
-    - backend port
-    - TLS secret name
-    - host value
+    Validate bleater-ui ingress configuration.
     """
 
     cmd = """
@@ -51,8 +48,11 @@ def check_ingress():
     return True, "Ingress correctly configured"
 
 
-def grade():
+# ✅ IMPORTANT FIX HERE
+def grade(context=None):
     ok, msg = check_ingress()
+
     if ok:
         return 1.0, msg
+
     return 0.0, msg
