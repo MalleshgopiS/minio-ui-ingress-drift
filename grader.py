@@ -1,58 +1,68 @@
 import subprocess
+from apex_arena.grader import GradeResult
 
 
-def run(cmd):
-    result = subprocess.run(
-        cmd,
-        shell=True,
-        capture_output=True,
-        text=True,
-    )
-    return result.returncode, result.stdout.strip()
+NAMESPACE = "bleater"
+INGRESS = "bleater-ui"
+
+
+def run(cmd: str) -> str:
+    """Run shell command and return output."""
+    return subprocess.check_output(
+        cmd, shell=True, text=True
+    ).strip()
 
 
 def check_ingress():
     """
-    Validate bleater-ui ingress configuration.
+    Validate ingress configuration drift is fixed.
+
+    Checks:
+    - backend service name
+    - backend service port
+    - TLS secret name
     """
 
-    cmd = """
-    kubectl get ingress bleater-ui -n bleater \
-    -o jsonpath='{.spec.rules[0].host} {.spec.rules[0].http.paths[0].backend.service.name} {.spec.rules[0].http.paths[0].backend.service.port.number} {.spec.tls[0].secretName}'
-    """
+    try:
+        output = run(
+            f"kubectl get ingress {INGRESS} -n {NAMESPACE} "
+            "-o jsonpath=\"{.spec.rules[0].http.paths[0].backend.service.name} "
+            "{.spec.rules[0].http.paths[0].backend.service.port.number} "
+            "{.spec.tls[0].secretName}\""
+        )
 
-    code, out = run(cmd)
+        service, port, secret = output.split()
 
-    if code != 0:
-        return False, "Ingress not found"
+        if service != "bleater-minio":
+            return GradeResult(
+                score=0.0,
+                feedback=f"Wrong service name: {service}"
+            )
 
-    parts = out.replace("'", "").split()
+        if port != "9001":
+            return GradeResult(
+                score=0.0,
+                feedback=f"Wrong service port: {port}"
+            )
 
-    if len(parts) != 4:
-        return False, f"Unexpected output: {out}"
+        if secret != "bleater-minio-tls":
+            return GradeResult(
+                score=0.0,
+                feedback=f"Wrong TLS secret: {secret}"
+            )
 
-    host, service, port, secret = parts
+        return GradeResult(
+            score=1.0,
+            feedback="Ingress correctly fixed ✅"
+        )
 
-    if host != "minio.devops.local":
-        return False, f"Wrong host: {host}"
-
-    if service != "bleater-minio":
-        return False, f"Wrong service: {service}"
-
-    if port != "9001":
-        return False, f"Wrong port: {port}"
-
-    if secret != "bleater-minio-tls":
-        return False, f"Wrong TLS secret: {secret}"
-
-    return True, "Ingress correctly configured"
+    except subprocess.CalledProcessError:
+        return GradeResult(
+            score=0.0,
+            feedback="Ingress not found"
+        )
 
 
-# ✅ IMPORTANT FIX HERE
-def grade(context=None):
-    ok, msg = check_ingress()
-
-    if ok:
-        return 1.0, msg
-
-    return 0.0, msg
+def grade():
+    """Apex entrypoint."""
+    return check_ingress()
