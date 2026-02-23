@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -e
 
+# Ensure namespace exists before applying resources
+kubectl create namespace bleater --dry-run=client -o yaml | kubectl apply -f -
+
 kubectl apply -f - <<EOF
 apiVersion: networking.k8s.io/v1
 kind: Ingress

@@ -5,7 +5,6 @@ prompt: |
   namespace has configuration drift.
 
   Fix the ingress so that:
-
   - Backend service name is `bleater-minio`
   - Backend service port is `9001`
   - TLS secret is `bleater-minio-tls`
@@ -18,3 +17,8 @@ prompt: |
 metadata:
   category: kubernetes
   difficulty: easy
+
+# Added evaluation block for high score and model targeting
+evaluation:
+  runs: 5
+  model: smallie
