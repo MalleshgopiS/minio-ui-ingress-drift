@@ -1,26 +1,22 @@
 import subprocess
-from apex_arena.grader import GradeResult
 
 
 NAMESPACE = "bleater"
 INGRESS = "bleater-ui"
 
 
-def run(cmd: str) -> str:
-    """Run shell command and return output."""
+def run(cmd: str):
+    """Run shell command safely."""
     return subprocess.check_output(
-        cmd, shell=True, text=True
+        cmd,
+        shell=True,
+        text=True
     ).strip()
 
 
 def check_ingress():
     """
-    Validate ingress configuration drift is fixed.
-
-    Checks:
-    - backend service name
-    - backend service port
-    - TLS secret name
+    Validate MinIO ingress drift fix.
     """
 
     try:
@@ -34,35 +30,38 @@ def check_ingress():
         service, port, secret = output.split()
 
         if service != "bleater-minio":
-            return GradeResult(
-                score=0.0,
-                feedback=f"Wrong service name: {service}"
-            )
+            return {
+                "score": 0.0,
+                "feedback": f"Wrong service name: {service}"
+            }
 
         if port != "9001":
-            return GradeResult(
-                score=0.0,
-                feedback=f"Wrong service port: {port}"
-            )
+            return {
+                "score": 0.0,
+                "feedback": f"Wrong service port: {port}"
+            }
 
         if secret != "bleater-minio-tls":
-            return GradeResult(
-                score=0.0,
-                feedback=f"Wrong TLS secret: {secret}"
-            )
+            return {
+                "score": 0.0,
+                "feedback": f"Wrong TLS secret: {secret}"
+            }
 
-        return GradeResult(
-            score=1.0,
-            feedback="Ingress correctly fixed ✅"
-        )
+        return {
+            "score": 1.0,
+            "feedback": "Ingress correctly fixed ✅"
+        }
 
     except subprocess.CalledProcessError:
-        return GradeResult(
-            score=0.0,
-            feedback="Ingress not found"
-        )
+        return {
+            "score": 0.0,
+            "feedback": "Ingress not found"
+        }
 
 
-def grade():
-    """Apex entrypoint."""
+def grade(task_output=None):
+    """
+    Apex entrypoint.
+    Must accept one argument (even if unused).
+    """
     return check_ingress()
