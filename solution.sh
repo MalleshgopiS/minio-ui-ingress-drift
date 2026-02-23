@@ -3,24 +3,39 @@ set -e
 
 echo "Fixing MinIO ingress drift..."
 
-if ! kubectl get ingress bleater-ui -n bleater >/dev/null 2>&1; then
+INGRESS="bleater-ui"
+NS="bleater"
+
+if ! kubectl get ingress $INGRESS -n $NS >/dev/null 2>&1; then
   echo "Ingress not found"
   exit 1
 fi
 
-kubectl patch ingress bleater-ui -n bleater --type='merge' -p '
-spec:
-  rules:
-  - host: minio.devops.local
-    http:
-      paths:
-      - backend:
-          service:
-            name: bleater-minio
-            port:
-              number: 9001
-  tls:
-  - secretName: bleater-minio-tls
-'
+# Fix backend service name
+kubectl patch ingress $INGRESS -n $NS --type='json' -p='[
+  {
+    "op": "replace",
+    "path": "/spec/rules/0/http/paths/0/backend/service/name",
+    "value": "bleater-minio"
+  }
+]'
 
-echo "Ingress drift fixed."
+# Fix backend port
+kubectl patch ingress $INGRESS -n $NS --type='json' -p='[
+  {
+    "op": "replace",
+    "path": "/spec/rules/0/http/paths/0/backend/service/port/number",
+    "value": 9001
+  }
+]'
+
+# Fix TLS secret
+kubectl patch ingress $INGRESS -n $NS --type='json' -p='[
+  {
+    "op": "replace",
+    "path": "/spec/tls/0/secretName",
+    "value": "bleater-minio-tls"
+  }
+]'
+
+echo "Ingress drift fixed successfully."
