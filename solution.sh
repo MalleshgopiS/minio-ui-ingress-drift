@@ -1,17 +1,41 @@
 #!/usr/bin/env bash
 set -e
 
+echo "Fixing MinIO ingress drift..."
+
 INGRESS="bleater-ui"
 NS="bleater"
 
-# Check for existence
 if ! kubectl get ingress $INGRESS -n $NS >/dev/null 2>&1; then
+  echo "Ingress not found"
   exit 1
 fi
 
-# Atomic patch for service name, port, and TLS secret
+# Fix backend service name
 kubectl patch ingress $INGRESS -n $NS --type='json' -p='[
-  {"op": "replace", "path": "/spec/rules/0/http/paths/0/backend/service/name", "value": "bleater-minio"},
-  {"op": "replace", "path": "/spec/rules/0/http/paths/0/backend/service/port/number", "value": 9001},
-  {"op": "replace", "path": "/spec/tls/0/secretName", "value": "bleater-minio-tls"}
+  {
+    "op": "replace",
+    "path": "/spec/rules/0/http/paths/0/backend/service/name",
+    "value": "bleater-minio"
+  }
 ]'
+
+# Fix backend port
+kubectl patch ingress $INGRESS -n $NS --type='json' -p='[
+  {
+    "op": "replace",
+    "path": "/spec/rules/0/http/paths/0/backend/service/port/number",
+    "value": 9001
+  }
+]'
+
+# Fix TLS secret
+kubectl patch ingress $INGRESS -n $NS --type='json' -p='[
+  {
+    "op": "replace",
+    "path": "/spec/tls/0/secretName",
+    "value": "bleater-minio-tls"
+  }
+]'
+
+echo "Ingress drift fixed successfully."
