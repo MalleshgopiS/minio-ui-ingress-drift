@@ -1,14 +1,23 @@
-#!/usr/bin/env python3
 import subprocess
-from apex_arena._types import GradingResult
 
 
 def run(cmd):
-    r = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-    return r.returncode, r.stdout.strip()
+    result = subprocess.run(
+        cmd, shell=True, capture_output=True, text=True
+    )
+    return result.returncode, result.stdout.strip()
 
 
 def check_ingress():
+    """
+    Validate that the bleater-ui ingress has been corrected.
+
+    Checks:
+    - backend service name
+    - backend port
+    - TLS secret name
+    """
+
     cmd = """kubectl get ingress bleater-ui -n bleater -o jsonpath='{.spec.rules[0].http.paths[0].backend.service.name} {.spec.rules[0].http.paths[0].backend.service.port.number} {.spec.tls[0].secretName}'"""
     code, out = run(cmd)
 
@@ -29,12 +38,8 @@ def check_ingress():
     return True, "Ingress correctly configured"
 
 
-def grade(transcript: str):
+def grade():
     ok, msg = check_ingress()
-
-    return GradingResult(
-        score=1.0 if ok else 0.0,
-        subscores={"ingress_fixed": 1.0 if ok else 0.0},
-        weights={"ingress_fixed": 1.0},
-        feedback=msg
-    )
+    if ok:
+        return 1.0, msg
+    return 0.0, msg

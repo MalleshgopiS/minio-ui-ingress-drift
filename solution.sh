@@ -1,9 +1,14 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
-export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+echo "Searching for MinIO ingress..."
 
-echo "Fixing MinIO ingress drift..."
+if ! kubectl get ingress bleater-ui -n bleater >/dev/null 2>&1; then
+  echo "MinIO ingress not found"
+  exit 1
+fi
+
+echo "Fixing ingress configuration..."
 
 kubectl apply -f - <<EOF
 apiVersion: networking.k8s.io/v1
@@ -12,10 +17,7 @@ metadata:
   name: bleater-ui
   namespace: bleater
 spec:
-  tls:
-  - hosts:
-    - minio.devops.local
-    secretName: bleater-minio-tls
+  ingressClassName: nginx
   rules:
   - host: minio.devops.local
     http:
@@ -27,6 +29,10 @@ spec:
             name: bleater-minio
             port:
               number: 9001
+  tls:
+  - hosts:
+    - minio.devops.local
+    secretName: bleater-minio-tls
 EOF
 
 echo "Ingress fixed successfully."
