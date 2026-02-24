@@ -1,76 +1,110 @@
 import subprocess
 import json
+import time
 
 
 def run(cmd):
-    r = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-    return r.returncode, r.stdout.strip()
+    p = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+    return p.returncode, p.stdout.strip()
 
 
-# -------------------------
-# DNS CHECK
-# -------------------------
+def retry(fn, attempts=20, delay=3):
+    for _ in range(attempts):
+        if fn():
+            return True
+        time.sleep(delay)
+    return False
+
+
+# ------------------------------------------------
+# DNS MUST MATCH INGRESS IP
+# ------------------------------------------------
 def check_dns():
-    code, out = run("getent hosts bleater.devops.local")
-    return code == 0
+
+    code, ingress_ip = run("""
+kubectl get svc -n ingress-nginx ingress-nginx-controller \
+-o jsonpath='{.spec.clusterIP}'
+""")
+
+    if code != 0:
+        return False
+
+    code, resolved = run("getent hosts bleater.devops.local")
+
+    if code != 0:
+        return False
+
+    return ingress_ip in resolved
 
 
-# -------------------------
-# INGRESS CHECK
-# -------------------------
+# ------------------------------------------------
+# INGRESS VALIDATION
+# ------------------------------------------------
 def check_ingress():
-    cmd = """
-kubectl get ingress bleater -n bleater -o json
-"""
-    code, out = run(cmd)
+
+    code, out = run(
+        "kubectl get ingress bleater -n bleater -o json"
+    )
+
     if code != 0:
         return False
 
     data = json.loads(out)
 
-    paths = data["spec"]["rules"][0]["http"]["paths"]
+    try:
+        paths = data["spec"]["rules"][0]["http"]["paths"]
+    except Exception:
+        return False
 
-    root = next(p for p in paths if p["path"] == "/")
+    root_backend = None
 
-    svc = root["backend"]["service"]["name"]
-    port = root["backend"]["service"]["port"]["number"]
+    for p in paths:
+        if p.get("path") == "/":
+            root_backend = p["backend"]["service"]
 
-    tls = data["spec"]["tls"][0]["secretName"]
+    if not root_backend:
+        return False
+
+    tls_secret = data["spec"]["tls"][0]["secretName"]
 
     return (
-        svc == "bleater-minio"
-        and port == 9001
-        and tls == "bleater-ui-tls"
+        root_backend["name"] == "bleater-minio"
+        and root_backend["port"]["number"] == 9001
+        and tls_secret == "bleater-ui-tls"
     )
 
 
-# -------------------------
-# MINIO POLICY CHECK
-# -------------------------
+# ------------------------------------------------
+# MINIO POLICY
+# ------------------------------------------------
 def check_bucket():
-    code, out = run("mc anonymous get local/ui")
-    return "download" in out.lower()
+    code, out = run("mc anonymous get local/ui 2>/dev/null")
+    return code == 0 and "download" in out.lower()
 
 
-# -------------------------
-# END TO END CHECK
-# -------------------------
+# ------------------------------------------------
+# END-TO-END TEST
+# ------------------------------------------------
 def check_http():
     code, _ = run(
-        "curl -k --fail https://bleater.devops.local/index.html"
+        "curl -k --fail --max-time 5 https://bleater.devops.local/index.html"
     )
     return code == 0
 
 
+# ------------------------------------------------
+# MAIN
+# ------------------------------------------------
 def grade():
+
     checks = [
-        check_dns(),
-        check_ingress(),
-        check_bucket(),
-        check_http(),
+        retry(check_dns),
+        retry(check_ingress),
+        retry(check_bucket),
+        retry(check_http),
     ]
 
     if all(checks):
-        return 1.0, "UI fully restored"
+        return 1.0, "UI restored successfully"
 
-    return 0.0, "System still broken"
+    return 0.0, "Infrastructure still misconfigured"

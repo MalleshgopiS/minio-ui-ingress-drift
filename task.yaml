@@ -1,39 +1,35 @@
-id: minio-ui-dns-ingress-drift
+#!/usr/bin/env bash
+set -e
 
-prompt: |
-  The Bleater platform UI is partially broken.
+echo "Discover ingress IP..."
 
-  Symptoms:
-  - API endpoints under /api/* work correctly.
-  - Static UI assets fail externally.
-  - Internal cluster communication works normally.
+INGRESS_IP=$(kubectl get svc -n ingress-nginx ingress-nginx-controller \
+  -o jsonpath='{.spec.clusterIP}')
 
-  Investigate and fix the external access path for:
-      https://bleater.devops.local
+echo "Fixing dnsmasq..."
 
-  The issue involves configuration drift across:
-  - dnsmasq wildcard DNS
-  - NGINX ingress routing
-  - MinIO service configuration
-  - TLS configuration
-  - MinIO bucket permissions
+sudo sed -i "s|address=/.devops.local/.*|address=/.devops.local/${INGRESS_IP}|" \
+  /etc/dnsmasq.d/devops.local.conf
 
-  Requirements:
+sudo systemctl restart dnsmasq || true
 
-  1. *.devops.local must resolve to the active ingress IP.
-  2. Ingress must route:
-        /api → API gateway (unchanged)
-        /    → MinIO console service
-  3. MinIO backend must use correct service + port.
-  4. TLS secret referenced by ingress must be valid.
-  5. MinIO UI bucket must allow public read access.
 
-  Constraints:
-  - Do NOT create new services.
-  - Modify existing resources only.
-  - Do NOT restart k3s or docker.
-  - Fix using Kubernetes + system configuration only.
+echo "Fix ingress routing..."
 
-metadata:
-  category: devops
-  difficulty: hard
+kubectl get ingress bleater -n bleater -o json | \
+jq '
+.spec.rules[0].http.paths |= map(
+  if .path == "/" then
+    .backend.service.name="bleater-minio" |
+    .backend.service.port.number=9001
+  else .
+  end
+)
+| .spec.tls[0].secretName="bleater-ui-tls"
+' | kubectl apply -f -
+
+
+echo "Fix MinIO bucket policy..."
+mc anonymous set download local/ui || true
+
+echo "All fixes applied."
