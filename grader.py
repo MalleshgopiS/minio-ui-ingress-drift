@@ -1,6 +1,10 @@
+#!/usr/bin/env python3
+
 import subprocess
 import json
+import os
 import time
+from apex_arena._types import GradingResult
 
 
 # --------------------------------------------------
@@ -8,172 +12,123 @@ import time
 # --------------------------------------------------
 
 def run(cmd):
-    result = subprocess.run(
-        cmd,
-        shell=True,
-        capture_output=True,
-        text=True
-    )
-    return result.returncode, result.stdout.strip(), result.stderr.strip()
+    try:
+        result = subprocess.run(
+            cmd,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        return result.returncode, result.stdout.strip(), result.stderr.strip()
+    except Exception as e:
+        return -1, "", str(e)
 
 
-def retry(cmd, attempts=20, delay=5):
-    """
-    Wait for system convergence (Nebula requirement).
-    """
-    for _ in range(attempts):
-        code, out, _ = run(cmd)
+# --------------------------------------------------
+# wait for cluster convergence
+# --------------------------------------------------
+
+def wait_for_pods_ready(timeout=120):
+    start = time.time()
+
+    while time.time() - start < timeout:
+        code, out, _ = run(
+            "kubectl get pods -n bleater "
+            "--no-headers "
+            "-o custom-columns=':status.conditions[?(@.type==\"Ready\")].status'"
+        )
+
         if code == 0 and out:
-            return True, out
-        time.sleep(delay)
+            statuses = out.split("\n")
+            if all(s.strip() == "True" for s in statuses if s.strip()):
+                return True
 
-    return False, ""
+        time.sleep(5)
+
+    return False
 
 
 # --------------------------------------------------
-# ingress checks
+# run nebula test suite
 # --------------------------------------------------
 
-def check_ingress():
-    cmd = """
-    kubectl get ingress bleater-ui -n bleater -o json
+def run_test_suite():
+    """
+    Nebula validation entrypoint.
+    Test suite validates:
+      - DNS routing
+      - ingress correctness
+      - MinIO access
+      - UI loads
+      - API health
     """
 
-    code, out, err = run(cmd)
-    if code != 0:
-        return False, "Ingress bleater-ui not found"
+    test_script = "/root/tests/test_suite.sh"
+    results_file = "/root/tests/test_results.json"
 
-    data = json.loads(out)
+    if not os.path.exists(test_script):
+        return False, "Test suite missing"
 
-    host = data["spec"]["rules"][0]["host"]
-    svc = data["spec"]["rules"][0]["http"]["paths"][0]["backend"]["service"]["name"]
-    port = str(
-        data["spec"]["rules"][0]["http"]["paths"][0]["backend"]["service"]["port"]["number"]
+    # wait for infra stabilization
+    wait_for_pods_ready()
+
+    try:
+        subprocess.run(
+            ["bash", test_script],
+            cwd="/root/tests",
+            timeout=300,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.TimeoutExpired:
+        return False, "Test suite timeout"
+
+    if not os.path.exists(results_file):
+        return False, "Test results not generated"
+
+    try:
+        with open(results_file) as f:
+            results = json.load(f)
+    except Exception:
+        return False, "Invalid test_results.json"
+
+    total = len(results)
+    passed = sum(results.values())
+
+    if total == 0:
+        return False, "No tests executed"
+
+    if passed == total:
+        return True, f"All {total} tests passed"
+
+    failed = [k for k, v in results.items() if v == 0]
+
+    return False, f"{passed}/{total} tests passed. Failed: {', '.join(failed)}"
+
+
+# --------------------------------------------------
+# main grade entrypoint
+# --------------------------------------------------
+
+def grade(transcript: str) -> GradingResult:
+
+    feedback_parts = []
+
+    suite_ok, msg = run_test_suite()
+
+    if suite_ok:
+        feedback_parts.append(f"✓ {msg}")
+        score = 1.0
+    else:
+        feedback_parts.append(f"✗ {msg}")
+        score = 0.0
+
+    feedback = " | ".join(feedback_parts)
+
+    return GradingResult(
+        score=score,
+        subscores={"nebula_validation": score},
+        weights={"nebula_validation": 1.0},
+        feedback=feedback,
     )
-    tls = data["spec"]["tls"][0]["secretName"]
-
-    if host != "bleater.devops.local":
-        return False, f"Wrong host: {host}"
-
-    if svc != "bleater-minio":
-        return False, f"Wrong backend service: {svc}"
-
-    if port not in ["9000", "9001"]:
-        return False, f"Unexpected MinIO port: {port}"
-
-    if tls != "bleater-minio-tls":
-        return False, f"Wrong TLS secret: {tls}"
-
-    return True, "Ingress OK"
-
-
-# --------------------------------------------------
-# dnsmasq validation
-# --------------------------------------------------
-
-def check_dnsmasq():
-    """
-    Ensure wildcard DNS points to ingress IP.
-    """
-
-    ok, ingress_ip = retry(
-        "kubectl -n ingress-nginx get svc ingress-nginx-controller "
-        "-o jsonpath='{.spec.clusterIP}'"
-    )
-
-    if not ok:
-        return False, "Cannot determine ingress IP"
-
-    code, out, _ = run("cat /etc/dnsmasq.d/devops.conf 2>/dev/null")
-
-    if code != 0:
-        return False, "dnsmasq config missing"
-
-    if ingress_ip not in out:
-        return False, "dnsmasq not pointing to ingress IP"
-
-    return True, "dnsmasq OK"
-
-
-# --------------------------------------------------
-# runtime validation
-# --------------------------------------------------
-
-def curl_host(path="/"):
-    ok, ingress_ip = retry(
-        "kubectl -n ingress-nginx get svc ingress-nginx-controller "
-        "-o jsonpath='{.spec.clusterIP}'"
-    )
-
-    if not ok:
-        return 1, ""
-
-    cmd = f"""
-    curl -sk -H "Host: bleater.devops.local" https://{ingress_ip}{path}
-    """
-
-    return run(cmd)
-
-
-def check_ui_loads():
-    code, out, _ = curl_host("/")
-
-    if code != 0:
-        return False, "UI request failed"
-
-    if "<html" not in out.lower():
-        return False, "UI HTML not served"
-
-    return True, "UI loads"
-
-
-def check_api():
-    code, out, _ = curl_host("/api/health")
-
-    if code != 0:
-        return False, "API unreachable"
-
-    if "ok" not in out.lower():
-        return False, "API unhealthy"
-
-    return True, "API healthy"
-
-
-# --------------------------------------------------
-# MinIO public bucket check
-# --------------------------------------------------
-
-def check_minio_public():
-    """
-    Anonymous access should work.
-    403 means bucket still private.
-    """
-
-    code, out, err = curl_host("/index.html")
-
-    if "AccessDenied" in out or "403" in err:
-        return False, "MinIO bucket not public"
-
-    return True, "MinIO public access OK"
-
-
-# --------------------------------------------------
-# main grading
-# --------------------------------------------------
-
-def grade():
-
-    checks = [
-        check_ingress,
-        check_dnsmasq,
-        check_ui_loads,
-        check_api,
-        check_minio_public,
-    ]
-
-    for check in checks:
-        ok, msg = check()
-        if not ok:
-            return 0.0, msg
-
-    return 1.0, "All validations passed — UI + API stable"
