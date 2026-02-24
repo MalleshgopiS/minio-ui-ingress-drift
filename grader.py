@@ -2,15 +2,12 @@ import subprocess
 
 
 def run(cmd):
-    result = subprocess.run(
-        cmd, shell=True, capture_output=True, text=True
-    )
-    return result.returncode, result.stdout.strip()
+    return subprocess.check_output(cmd, shell=True, text=True).strip()
 
 
 def check_ingress():
     """
-    Validate the bleater-ui ingress configuration.
+    Validate bleater-ui ingress configuration.
 
     Checks:
     - backend service name
@@ -19,40 +16,50 @@ def check_ingress():
     - host value
     """
 
-    cmd = """
-    kubectl get ingress bleater-ui -n bleater \
-    -o jsonpath='{.spec.rules[0].host} {.spec.rules[0].http.paths[0].backend.service.name} {.spec.rules[0].http.paths[0].backend.service.port.number} {.spec.tls[0].secretName}'
-    """
+    try:
+        output = run(
+            "kubectl get ingress bleater-ui -n bleater "
+            "-o jsonpath='{.spec.rules[0].host} "
+            "{.spec.rules[0].http.paths[0].backend.service.name} "
+            "{.spec.rules[0].http.paths[0].backend.service.port.number} "
+            "{.spec.tls[0].secretName}'"
+        ).replace("'", "")
+    except Exception as e:
+        return False, f"Ingress not found or kubectl failed: {e}"
 
-    code, out = run(cmd)
-
-    if code != 0:
-        return False, "Ingress not found"
-
-    parts = out.replace("'", "").split()
+    parts = output.split()
 
     if len(parts) != 4:
-        return False, f"Unexpected output: {out}"
+        return False, f"Unexpected output format: {output}"
 
-    host, service, port, secret = parts
+    host, service, port, tls = parts
 
     if host != "minio.devops.local":
-        return False, f"Wrong host: {host}"
+        return False, f"Host incorrect: {host}"
 
     if service != "bleater-minio":
-        return False, f"Wrong service: {service}"
+        return False, f"Service incorrect: {service}"
 
     if port != "9001":
-        return False, f"Wrong port: {port}"
+        return False, f"Port incorrect: {port}"
 
-    if secret != "bleater-minio-tls":
-        return False, f"Wrong TLS secret: {secret}"
+    if tls != "bleater-minio-tls":
+        return False, f"TLS secret incorrect: {tls}"
 
-    return True, "Ingress correctly configured"
+    return True, "All ingress values correct"
 
 
-def grade():
-    ok, msg = check_ingress()
+# ⭐⭐⭐ CRITICAL FIX HERE ⭐⭐⭐
+def grade(context=None):
+    ok, message = check_ingress()
+
     if ok:
-        return 1.0, msg
-    return 0.0, msg
+        return {
+            "score": 1.0,
+            "feedback": message
+        }
+
+    return {
+        "score": 0.0,
+        "feedback": message
+    }
