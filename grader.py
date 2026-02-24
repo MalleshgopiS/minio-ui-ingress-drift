@@ -1,34 +1,58 @@
 import subprocess
-import json
 
-def run(cmd: str):
-    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-    return result.returncode, result.stdout.strip(), result.stderr.strip()
+
+def run(cmd):
+    result = subprocess.run(
+        cmd, shell=True, capture_output=True, text=True
+    )
+    return result.returncode, result.stdout.strip()
+
 
 def check_ingress():
-    # Fetch full JSON to ensure reliable parsing
-    cmd = "kubectl get ingress bleater-ui -n bleater -o json"
-    rc, out, err = run(cmd)
-    if rc != 0:
-        return False, f"Failed to get ingress: {err}"
+    """
+    Validate the bleater-ui ingress configuration.
 
-    try:
-        data = json.loads(out)
-        spec = data.get('spec', {})
-        # Extract fields
-        service = spec['rules'][0]['http']['paths'][0]['backend']['service']['name']
-        port = spec['rules'][0]['http']['paths'][0]['backend']['service']['port']['number']
-        secret = spec['tls'][0]['secretName']
+    Checks:
+    - backend service name
+    - backend port
+    - TLS secret name
+    - host value
+    """
 
-        if service == "bleater-minio" and port == 9001 and secret == "bleater-minio-tls":
-            return True, "Success"
-        return False, f"Values mismatch: {service}, {port}, {secret}"
-    except (KeyError, IndexError):
-        return False, "Ingress structure is missing required fields"
+    cmd = """
+    kubectl get ingress bleater-ui -n bleater \
+    -o jsonpath='{.spec.rules[0].host} {.spec.rules[0].http.paths[0].backend.service.name} {.spec.rules[0].http.paths[0].backend.service.port.number} {.spec.tls[0].secretName}'
+    """
+
+    code, out = run(cmd)
+
+    if code != 0:
+        return False, "Ingress not found"
+
+    parts = out.replace("'", "").split()
+
+    if len(parts) != 4:
+        return False, f"Unexpected output: {out}"
+
+    host, service, port, secret = parts
+
+    if host != "minio.devops.local":
+        return False, f"Wrong host: {host}"
+
+    if service != "bleater-minio":
+        return False, f"Wrong service: {service}"
+
+    if port != "9001":
+        return False, f"Wrong port: {port}"
+
+    if secret != "bleater-minio-tls":
+        return False, f"Wrong TLS secret: {secret}"
+
+    return True, "Ingress correctly configured"
+
 
 def grade():
-    success, message = check_ingress()
-    return {"score": 1.0 if success else 0.0, "message": message}
-
-if __name__ == "__main__":
-    print(json.dumps(grade()))
+    ok, msg = check_ingress()
+    if ok:
+        return 1.0, msg
+    return 0.0, msg
