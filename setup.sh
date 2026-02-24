@@ -1,51 +1,69 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
-echo "Waiting for Kubernetes API + bleater namespace..."
+NAMESPACE="bleater"
+INGRESS="bleater-ui"
+
+echo "Waiting for Kubernetes API..."
 
 # --------------------------------------------------
-# WAIT FOR CLUSTER CONVERGENCE (NEBULA SAFE FIX)
+# wait for namespace
 # --------------------------------------------------
-
 for i in {1..60}; do
-  if kubectl get namespace bleater >/dev/null 2>&1; then
-    echo "Namespace bleater ready"
+  if kubectl get ns $NAMESPACE >/dev/null 2>&1; then
+    echo "Namespace ready"
     break
   fi
   sleep 5
 done
 
-kubectl get namespace bleater \
-  || { echo "Namespace bleater not ready"; exit 1; }
-
-echo "Injecting ingress drift..."
+kubectl get ns $NAMESPACE >/dev/null
 
 # --------------------------------------------------
-# ORIGINAL YOUR CODE (UNCHANGED)
+# VERY IMPORTANT:
+# wait until ingress EXISTS (from snapshot restore)
 # --------------------------------------------------
 
-kubectl apply -f - <<EOF
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: bleater-ui
-  namespace: bleater
-spec:
-  rules:
-  - host: minio.devops.local
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: wrong-service
-            port:
-              number: 80
-  tls:
-  - hosts:
-    - minio.devops.local
-    secretName: wrong-secret
-EOF
+echo "Waiting for existing ingress (snapshot restore)..."
 
-echo "✅ Drift injected"
+for i in {1..90}; do
+  if kubectl get ingress $INGRESS -n $NAMESPACE >/dev/null 2>&1; then
+    echo "Ingress detected"
+    break
+  fi
+  sleep 5
+done
+
+# HARD FAIL if not found
+if ! kubectl get ingress $INGRESS -n $NAMESPACE >/dev/null 2>&1; then
+  echo "ERROR: ingress never appeared — refusing to create new one"
+  exit 1
+fi
+
+# --------------------------------------------------
+# PATCH ONLY (NEVER APPLY)
+# --------------------------------------------------
+
+echo "Injecting ingress drift safely..."
+
+kubectl patch ingress $INGRESS -n $NAMESPACE \
+  --type=json \
+  -p='[
+    {
+      "op":"replace",
+      "path":"/spec/rules/0/http/paths/0/backend/service/name",
+      "value":"wrong-service"
+    },
+    {
+      "op":"replace",
+      "path":"/spec/rules/0/http/paths/0/backend/service/port/number",
+      "value":80
+    },
+    {
+      "op":"replace",
+      "path":"/spec/tls/0/secretName",
+      "value":"wrong-secret"
+    }
+  ]'
+
+echo "✅ Drift injected (patched existing ingress)"
