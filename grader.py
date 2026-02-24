@@ -1,40 +1,76 @@
-#!/usr/bin/env python3
 import subprocess
-from apex_arena._types import GradingResult
+import json
 
-def run_kubectl(cmd):
-    full_cmd = f"KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl {cmd}"
-    result = subprocess.run(full_cmd, shell=True, capture_output=True, text=True)
-    return result.returncode, result.stdout.strip(), result.stderr.strip()
 
-def grade(transcript: str) -> GradingResult:
-    feedback_parts = []
-    
-    # 1. Check if Ingress exists
-    code, out, _ = run_kubectl("get ingress minio-ui-ingress -n minio -o name")
-    if code == 0 and "minio-ui-ingress" in out:
-        feedback_parts.append("✓ Minio UI Ingress exists")
-        ingress_exists = True
-    else:
-        feedback_parts.append("✗ Minio UI Ingress not found")
-        ingress_exists = False
+def run(cmd):
+    r = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+    return r.returncode, r.stdout.strip()
 
-    # 2. Check Configuration
-    host_code, host, _ = run_kubectl("get ingress minio-ui-ingress -n minio -o jsonpath='{.spec.rules[0].host}'")
-    port_code, port, _ = run_kubectl("get ingress minio-ui-ingress -n minio -o jsonpath='{.spec.rules[0].http.paths[0].backend.service.port.number}'")
-    
-    if host == "minio-ui.devops.local" and port == "9001":
-        feedback_parts.append("✓ Host and Backend port correctly configured")
-        config_ok = True
-    else:
-        feedback_parts.append("✗ Ingress configuration mismatch")
-        config_ok = False
 
-    final_score = 1.0 if (ingress_exists and config_ok) else 0.0
+# -------------------------
+# DNS CHECK
+# -------------------------
+def check_dns():
+    code, out = run("getent hosts bleater.devops.local")
+    return code == 0
 
-    return GradingResult(
-        score=final_score,
-        subscores={"ingress_drift_fixed": final_score},
-        weights={"ingress_drift_fixed": 1.0},
-        feedback=" | ".join(feedback_parts)
+
+# -------------------------
+# INGRESS CHECK
+# -------------------------
+def check_ingress():
+    cmd = """
+kubectl get ingress bleater -n bleater -o json
+"""
+    code, out = run(cmd)
+    if code != 0:
+        return False
+
+    data = json.loads(out)
+
+    paths = data["spec"]["rules"][0]["http"]["paths"]
+
+    root = next(p for p in paths if p["path"] == "/")
+
+    svc = root["backend"]["service"]["name"]
+    port = root["backend"]["service"]["port"]["number"]
+
+    tls = data["spec"]["tls"][0]["secretName"]
+
+    return (
+        svc == "bleater-minio"
+        and port == 9001
+        and tls == "bleater-ui-tls"
     )
+
+
+# -------------------------
+# MINIO POLICY CHECK
+# -------------------------
+def check_bucket():
+    code, out = run("mc anonymous get local/ui")
+    return "download" in out.lower()
+
+
+# -------------------------
+# END TO END CHECK
+# -------------------------
+def check_http():
+    code, _ = run(
+        "curl -k --fail https://bleater.devops.local/index.html"
+    )
+    return code == 0
+
+
+def grade():
+    checks = [
+        check_dns(),
+        check_ingress(),
+        check_bucket(),
+        check_http(),
+    ]
+
+    if all(checks):
+        return 1.0, "UI fully restored"
+
+    return 0.0, "System still broken"

@@ -1,17 +1,39 @@
-id: minio-ui-ingress-drift
+id: minio-ui-dns-ingress-drift
+
 prompt: |
-  [Context]
-  You are a DevOps engineer maintaining the storage infrastructure for Bleater. 
-  The Minio object storage UI is supposed to be accessible via an Ingress at `minio-ui.devops.local`. 
-  
-  Currently, developers are reporting they cannot access the console. Preliminary checks suggest a configuration drift in the `minio` namespace.
-  
-  [TASK]
-  1. Identify the service name and port for the Minio Console (UI) in the `minio` namespace.
-  2. Create or fix an Ingress named `minio-ui-ingress` in the `minio` namespace.
-  3. The Ingress must route traffic from host `minio-ui.devops.local` to the correct service on the correct port.
-  
-  IMPORTANT: Do NOT use any interactive commands.
+  The Bleater platform UI is partially broken.
+
+  Symptoms:
+  - API endpoints under /api/* work correctly.
+  - Static UI assets fail externally.
+  - Internal cluster communication works normally.
+
+  Investigate and fix the external access path for:
+      https://bleater.devops.local
+
+  The issue involves configuration drift across:
+  - dnsmasq wildcard DNS
+  - NGINX ingress routing
+  - MinIO service configuration
+  - TLS configuration
+  - MinIO bucket permissions
+
+  Requirements:
+
+  1. *.devops.local must resolve to the active ingress IP.
+  2. Ingress must route:
+        /api → API gateway (unchanged)
+        /    → MinIO console service
+  3. MinIO backend must use correct service + port.
+  4. TLS secret referenced by ingress must be valid.
+  5. MinIO UI bucket must allow public read access.
+
+  Constraints:
+  - Do NOT create new services.
+  - Modify existing resources only.
+  - Do NOT restart k3s or docker.
+  - Fix using Kubernetes + system configuration only.
+
 metadata:
-  category: kubernetes
-  difficulty: easy
+  category: devops
+  difficulty: hard

@@ -1,64 +1,80 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
-# --- Standard Header ---
-echo "Ensuring supervisord is running..."
-/usr/bin/supervisord -c /etc/supervisor/supervisord.conf 2>/dev/null || true
-sleep 5
-export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+echo "Creating cascading drift scenario..."
 
-until kubectl get nodes &>/dev/null; do
-    sleep 2
-done
+############################
+# WRONG DNSMASQ CONFIG
+############################
+sudo mkdir -p /etc/dnsmasq.d
 
-# --- Task Specific Setup ---
-kubectl create namespace minio --dry-run=client -o yaml | kubectl apply -f -
-
-# GRANT PERMISSIONS TO UBUNTU USER (Fixes the Forbidden error)
-cat <<EOF | kubectl apply -f -
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: minio-ingress-admin
-  namespace: minio
-rules:
-- apiGroups: ["networking.k8s.io"]
-  resources: ["ingresses"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: minio-ingress-admin-binding
-  namespace: minio
-subjects:
-- kind: User
-  name: system:serviceaccount:default:ubuntu-user
-  apiGroup: rbac.authorization.k8s.io
-roleRef:
-  kind: Role
-  name: minio-ingress-admin
-  apiGroup: rbac.authorization.k8s.io
+cat <<EOF | sudo tee /etc/dnsmasq.d/devops.local.conf
+address=/.devops.local/10.10.10.10
 EOF
 
-# Create the Service
-cat <<EOF | kubectl apply -f -
+sudo systemctl restart dnsmasq || true
+
+############################
+# MINIO SERVICE (correct one)
+############################
+kubectl apply -f - <<EOF
 apiVersion: v1
 kind: Service
 metadata:
-  name: minio-console
-  namespace: minio
+  name: bleater-minio
+  namespace: bleater
 spec:
-  ports:
-  - port: 9001
-    targetPort: 9001
-    protocol: TCP
-    name: http
   selector:
     app: minio
+  ports:
+  - name: console
+    port: 9001
+    targetPort: 9001
 EOF
 
-# Ensure the drift
-kubectl delete ingress minio-ui-ingress -n minio --ignore-not-found=true
+############################
+# BROKEN INGRESS
+############################
+kubectl apply -f - <<EOF
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bleater
+  namespace: bleater
+spec:
+  tls:
+  - hosts:
+    - bleater.devops.local
+    secretName: old-tls-secret
 
-echo "Setup complete. RBAC permissions granted and service created."
+  rules:
+  - host: bleater.devops.local
+    http:
+      paths:
+
+      # API works
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: api-gateway
+            port:
+              number: 80
+
+      # UI broken
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: old-minio
+            port:
+              number: 9000
+EOF
+
+############################
+# MINIO PRIVATE BUCKET POLICY
+############################
+mc alias set local http://bleater-minio:9000 minio minio123 || true
+mc anonymous set none local/ui || true
+
+echo "Drift injected."
