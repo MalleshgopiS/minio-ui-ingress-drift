@@ -11,7 +11,7 @@ if ! kubectl get ingress $INGRESS -n $NS >/dev/null 2>&1; then
   exit 1
 fi
 
-# Fix backend service name
+# backend service name
 kubectl patch ingress $INGRESS -n $NS --type='json' -p='[
   {
     "op": "replace",
@@ -20,7 +20,7 @@ kubectl patch ingress $INGRESS -n $NS --type='json' -p='[
   }
 ]'
 
-# Fix backend port
+# backend
 kubectl patch ingress $INGRESS -n $NS --type='json' -p='[
   {
     "op": "replace",
@@ -29,7 +29,7 @@ kubectl patch ingress $INGRESS -n $NS --type='json' -p='[
   }
 ]'
 
-# Fix TLS secret
+# TLS
 kubectl patch ingress $INGRESS -n $NS --type='json' -p='[
   {
     "op": "replace",
