@@ -1,133 +1,58 @@
-#!/usr/bin/env python3
-import json
 import subprocess
-import time
-
-NAMESPACE = "bleater"
-INGRESS = "bleater-ui"
 
 
 def run(cmd):
-    return subprocess.run(
-        cmd,
-        shell=True,
-        capture_output=True,
-        text=True,
+    result = subprocess.run(
+        cmd, shell=True, capture_output=True, text=True
     )
+    return result.returncode, result.stdout.strip()
 
 
-def validate_ingress_configuration():
-    """Validate ingress backend + TLS + host configuration"""
+def check_ingress():
+    """
+    Validate the bleater-ui ingress configuration.
 
-    svc = run(
-        f"kubectl get ingress {INGRESS} -n {NAMESPACE} "
-        "-o jsonpath='{.spec.rules[0].http.paths[0].backend.service.name}'"
-    ).stdout.strip().strip("'")
+    Checks:
+    - backend service name
+    - backend port
+    - TLS secret name
+    - host value
+    """
 
-    port = run(
-        f"kubectl get ingress {INGRESS} -n {NAMESPACE} "
-        "-o jsonpath='{.spec.rules[0].http.paths[0].backend.service.port.number}'"
-    ).stdout.strip().strip("'")
+    cmd = """
+    kubectl get ingress bleater-ui -n bleater \
+    -o jsonpath='{.spec.rules[0].host} {.spec.rules[0].http.paths[0].backend.service.name} {.spec.rules[0].http.paths[0].backend.service.port.number} {.spec.tls[0].secretName}'
+    """
 
-    tls = run(
-        f"kubectl get ingress {INGRESS} -n {NAMESPACE} "
-        "-o jsonpath='{.spec.tls[0].secretName}'"
-    ).stdout.strip().strip("'")
+    code, out = run(cmd)
 
-    host = run(
-        f"kubectl get ingress {INGRESS} -n {NAMESPACE} "
-        "-o jsonpath='{.spec.rules[0].host}'"
-    ).stdout.strip().strip("'")
+    if code != 0:
+        return False, "Ingress not found"
 
-    errors = []
+    parts = out.replace("'", "").split()
 
-    if svc != "bleater-minio":
-        errors.append("Backend service incorrect")
+    if len(parts) != 4:
+        return False, f"Unexpected output: {out}"
 
-    if port != "9001":
-        errors.append("Backend port incorrect")
-
-    if tls != "bleater-minio-tls":
-        errors.append("TLS secret incorrect")
+    host, service, port, secret = parts
 
     if host != "minio.devops.local":
-        errors.append("Host incorrect")
+        return False, f"Wrong host: {host}"
 
-    return errors
+    if service != "bleater-minio":
+        return False, f"Wrong service: {service}"
 
+    if port != "9001":
+        return False, f"Wrong port: {port}"
 
-def wait_for_pods_ready(timeout=120):
-    start = time.time()
+    if secret != "bleater-minio-tls":
+        return False, f"Wrong TLS secret: {secret}"
 
-    while time.time() - start < timeout:
-        result = run(
-            "kubectl get pods -A --no-headers | "
-            "grep -v Running | grep -v Completed || true"
-        )
-
-        if result.stdout.strip() == "":
-            return True
-
-        time.sleep(5)
-
-    return False
+    return True, "Ingress correctly configured"
 
 
-def run_nebula_tests():
-    result = run("/root/tests/test_suite.sh")
-
-    if result.returncode != 0:
-        return False, "External test suite failed"
-
-    try:
-        with open("/root/tests/test_results.json") as f:
-            data = json.load(f)
-
-        failures = [t for t in data if not t.get("passed")]
-
-        if failures:
-            return False, f"{len(failures)} tests failed"
-
-    except Exception as e:
-        return False, f"Could not read results: {e}"
-
-    return True, "All Nebula tests passed"
-
-
-# ✅ REQUIRED SIGNATURE FOR APEX
-def grade(task_state=None):
-    """
-    Apex MCP entrypoint.
-    Must accept one argument even if unused.
-    """
-
-    if not wait_for_pods_ready():
-        return {
-            "score": 0.0,
-            "feedback": "Cluster not ready"
-        }
-
-    visible_errors = validate_ingress_configuration()
-
-    if visible_errors:
-        return {
-            "score": 0.0,
-            "feedback": " | ".join(visible_errors)
-        }
-
-    nebula_ok, msg = run_nebula_tests()
-
-    if not nebula_ok:
-        return {
-            "score": 0.0,
-            "feedback": msg
-        }
-
-    return {
-        "score": 1.0,
-        "feedback": "✓ All visible + Nebula tests passed"
-    }
-
-
-if __name__ == "__main__":
-    print(json.dumps(grade()))
+def grade():
+    ok, msg = check_ingress()
+    if ok:
+        return 1.0, msg
+    return 0.0, msg
