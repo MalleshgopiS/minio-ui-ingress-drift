@@ -1,10 +1,10 @@
 FROM nebula-devops:1.0.0
 
-WORKDIR /workspace
+WORKDIR /task
 
-COPY setup.sh /workspace/setup.sh
-COPY solution.sh /workspace/solution.sh
-COPY grader.py /workspace/grader.py
-COPY task.yaml /workspace/task.yaml
+COPY setup.sh .
+COPY solution.sh .
+COPY grader.py .
+COPY task.yaml .
 
-RUN chmod +x /workspace/setup.sh /workspace/solution.sh
+RUN chmod +x setup.sh solution.sh

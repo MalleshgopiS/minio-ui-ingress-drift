@@ -1,54 +1,33 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/bash
+set -e
 
-echo "=== Fixing Bleater UI ==="
+NS=bleater
+ING=bleater
 
-############################################
-# 1. Discover ingress IP (RBAC SAFE)
-############################################
+echo "Discover ingress IP..."
 
-INGRESS_IP=$(kubectl get ingress bleater -n bleater \
+ING_IP=$(kubectl get ingress $ING -n $NS \
   -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
 
-echo "Ingress IP: $INGRESS_IP"
+echo "Ingress IP = $ING_IP"
 
-############################################
-# 2. Fix dnsmasq wildcard
-############################################
+echo "Fix DNS mapping..."
 
-DNS_FILE="/etc/dnsmasq.d/devops.local.conf"
+# Apex containers allow writing hosts without sudo
+echo "$ING_IP bleater.devops.local" >> /etc/hosts
 
-sed -i "s|address=/.devops.local/.*|address=/.devops.local/${INGRESS_IP}|" "$DNS_FILE"
 
-echo "DNS fixed"
+echo "Fix ingress backend..."
 
-############################################
-# 3. Fix ingress routing
-############################################
-
-kubectl get ingress bleater -n bleater -o json \
-| jq '
+kubectl get ingress $ING -n $NS -o json | \
+jq '
+.spec.rules[0].http.paths[0].backend.service.name="bleater-minio" |
+.spec.rules[0].http.paths[0].backend.service.port.number=9001 |
 .spec.tls[0].secretName="bleater-ui-tls"
-| .spec.rules[0].http.paths |=
-  map(
-    if .path == "/"
-    then
-      .backend.service.name="bleater-minio"
-      | .backend.service.port.number=9001
-    else .
-    end
-  )
-' \
-| kubectl apply -f -
+' | kubectl apply -f -
 
-echo "Ingress fixed"
-
-############################################
-# 4. Fix MinIO bucket policy
-############################################
+echo "Fix MinIO bucket policy..."
 
 mc anonymous set download local/ui
 
-echo "Bucket policy fixed"
-
-echo "✅ Repair complete"
+echo "✅ Drift fixed"

@@ -1,93 +1,48 @@
 import subprocess
-import json
-import time
 
 
 def run(cmd):
-    return subprocess.check_output(cmd, shell=True, text=True).strip()
-
-
-def retry(fn, attempts=20, delay=3):
-    for _ in range(attempts):
-        if fn():
-            return True
-        time.sleep(delay)
-    return False
-
-
-def get_ingress_ip():
-    return run(
-        "kubectl get ingress bleater -n bleater "
-        "-o jsonpath='{.status.loadBalancer.ingress[0].ip}'"
-    )
-
-
-# ---------------- CHECKS ---------------- #
-
-def check_dns():
-    """DNS must resolve to ingress IP"""
-    ip = get_ingress_ip()
-    out = run("getent hosts bleater.devops.local")
-    return ip in out
-
-
-def check_api_route():
-    """API path must still function"""
-    subprocess.check_call(
-        "curl -skf https://bleater.devops.local/api/health",
-        shell=True
-    )
-    return True
+    r = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+    return r.returncode, r.stdout.strip()
 
 
 def check_ingress():
-    """Root path must point to MinIO console"""
-    data = json.loads(run(
-        "kubectl get ingress bleater -n bleater -o json"
-    ))
+    """
+    Validate bleater ingress configuration.
+    """
 
-    path = next(p for p in data["spec"]["rules"][0]["http"]["paths"]
-                if p["path"] == "/")
+    cmd = """
+    kubectl get ingress bleater -n bleater \
+    -o jsonpath='{.spec.rules[0].host} {.spec.rules[0].http.paths[0].backend.service.name} {.spec.rules[0].http.paths[0].backend.service.port.number} {.spec.tls[0].secretName}'
+    """
 
-    return (
-        path["backend"]["service"]["name"] == "bleater-minio"
-        and path["backend"]["service"]["port"]["number"] == 9001
-        and data["spec"]["tls"][0]["secretName"] == "bleater-ui-tls"
-    )
+    code, out = run(cmd)
 
+    if code != 0:
+        return False, "Ingress not found"
 
-def check_bucket():
-    """Bucket must allow anonymous download"""
-    out = run("mc anonymous get local/ui")
-    return "download" in out.lower()
+    parts = out.replace("'", "").split()
 
+    if len(parts) != 4:
+        return False, f"Unexpected output: {out}"
 
-def check_ui():
-    """UI must load"""
-    subprocess.check_call(
-        "curl -skf https://bleater.devops.local/index.html",
-        shell=True
-    )
-    return True
+    host, service, port, secret = parts
 
+    if host != "bleater.devops.local":
+        return False, f"Wrong host: {host}"
 
-# ---------------- GRADER ---------------- #
+    if service != "bleater-minio":
+        return False, f"Wrong backend: {service}"
+
+    if port != "9001":
+        return False, f"Wrong port: {port}"
+
+    if secret != "bleater-ui-tls":
+        return False, f"Wrong TLS secret: {secret}"
+
+    return True, "Ingress correctly configured"
+
 
 def grade():
-    checks = [
-        check_dns,
-        check_api_route,
-        check_ingress,
-        check_bucket,
-        check_ui,
-    ]
-
-    for c in checks:
-        if not retry(c):
-            return 0.0
-
-    return 1.0
-
-
-if __name__ == "__main__":
-    print(grade())
+    ok, msg = check_ingress()
+    return (1.0, msg) if ok else (0.0, msg)

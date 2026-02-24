@@ -1,40 +1,35 @@
-id: minio-ui-dns-ingress-drift
+id: minio-ui-ingress-drift
+title: Fix MinIO UI Ingress Drift
+difficulty: hard
 
-prompt: |
-  The Bleater platform UI is partially broken.
+description: |
+  The Bleater UI is broken externally while API endpoints still work.
 
-  API endpoints under /api/* work correctly,
-  but static UI assets fail externally.
+  Recent infrastructure drift caused:
 
-  Restore access to:
+  - dnsmasq wildcard *.devops.local pointing to old ingress IP
+  - ingress root path routing to wrong backend
+  - MinIO console port mismatch
+  - TLS secret rotation
+  - UI bucket became private
 
-      https://bleater.devops.local
+environment:
+  facts:
+    - Namespace: bleater
+    - Ingress name: bleater
+    - MinIO service: bleater-minio
+    - Console port: 9001
+    - TLS secret: bleater-ui-tls
+    - Bucket: ui
+    - mc alias: local
 
-  Environment Facts:
+requirements:
+  - bleater.devops.local resolves to ingress IP
+  - /api routing remains unchanged
+  - / routes to MinIO console (9001)
+  - ingress uses bleater-ui-tls
+  - UI bucket allows anonymous download
 
-  - All application resources run in the "bleater" namespace.
-  - An ingress resource named "bleater" exposes the platform.
-  - The API is served through the "api-gateway" service.
-  - The UI is served from the MinIO console service named "bleater-minio".
-  - The MinIO console listens on port 9001.
-  - TLS certificates were recently rotated and the active secret is named
-    "bleater-ui-tls".
-  - UI assets are stored in a bucket named "ui".
-  - The MinIO client (mc) is preconfigured with alias "local".
-  - External DNS for *.devops.local is managed using dnsmasq.
-
-  Requirements:
-
-  1. bleater.devops.local resolves to the active ingress controller IP.
-  2. /api continues routing to the api-gateway service unchanged.
-  3. / routes to the bleater-minio console service on port 9001.
-  4. The ingress references the bleater-ui-tls secret.
-  5. UI assets in the ui bucket are publicly readable.
-
-  Constraints:
-  - Modify existing resources only.
-  - Do NOT restart k3s or docker.
-
-metadata:
-  category: devops
-  difficulty: hard
+constraints:
+  - Do NOT restart k3s
+  - Modify existing resources only
