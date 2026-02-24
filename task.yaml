@@ -10,23 +10,26 @@ prompt: |
 
       https://bleater.devops.local
 
-  Environment Notes (discoverable during investigation):
+  Environment Facts:
 
-  - The Bleater UI is served from a MinIO console exposed through Kubernetes Ingress.
-  - The MinIO console runs as a service inside the "bleater" namespace.
-  - The console exposes a dedicated web port (different from the S3 API port).
-  - TLS certificates were recently rotated and ingress references may be outdated.
-  - External DNS is managed through dnsmasq wildcard entries for *.devops.local.
+  - All application resources run in the "bleater" namespace.
+  - An ingress resource named "bleater" exposes the platform.
+  - The API is served through the "api-gateway" service.
+  - The UI is served from the MinIO console service named "bleater-minio".
+  - The MinIO console listens on port 9001.
+  - TLS certificates were recently rotated and the active secret is named
+    "bleater-ui-tls".
   - UI assets are stored in a bucket named "ui".
-  - The MinIO client (mc) is preconfigured with an alias named "local".
+  - The MinIO client (mc) is preconfigured with alias "local".
+  - External DNS for *.devops.local is managed using dnsmasq.
 
   Requirements:
 
   1. bleater.devops.local resolves to the active ingress controller IP.
-  2. /api continues routing to the API gateway unchanged.
-  3. / routes to the MinIO console service.
-  4. Ingress references the active TLS secret.
-  5. UI assets in the MinIO bucket are publicly readable.
+  2. /api continues routing to the api-gateway service unchanged.
+  3. / routes to the bleater-minio console service on port 9001.
+  4. The ingress references the bleater-ui-tls secret.
+  5. UI assets in the ui bucket are publicly readable.
 
   Constraints:
   - Modify existing resources only.
