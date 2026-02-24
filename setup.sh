@@ -3,7 +3,9 @@ set -e
 
 echo "Waiting for Kubernetes API + bleater namespace..."
 
-# CLUSTER CONVERGENCE 
+# --------------------------------------------------
+# WAIT FOR CLUSTER CONVERGENCE (NEBULA SAFE FIX)
+# --------------------------------------------------
 
 for i in {1..60}; do
   if kubectl get namespace bleater >/dev/null 2>&1; then
@@ -18,6 +20,9 @@ kubectl get namespace bleater \
 
 echo "Injecting ingress drift..."
 
+# --------------------------------------------------
+# ORIGINAL YOUR CODE (UNCHANGED)
+# --------------------------------------------------
 
 kubectl apply -f - <<EOF
 apiVersion: networking.k8s.io/v1
@@ -43,4 +48,4 @@ spec:
     secretName: wrong-secret
 EOF
 
-echo "Drift injected Successfully"
+echo "✅ Drift injected"
