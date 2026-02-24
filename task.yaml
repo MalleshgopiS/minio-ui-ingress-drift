@@ -1,35 +1,35 @@
-#!/usr/bin/env bash
-set -e
+id: minio-ui-dns-ingress-drift
 
-echo "Discover ingress IP..."
+prompt: |
+  The Bleater platform UI is partially broken.
 
-INGRESS_IP=$(kubectl get svc -n ingress-nginx ingress-nginx-controller \
-  -o jsonpath='{.spec.clusterIP}')
+  API endpoints under /api/* work correctly,
+  but the web UI fails externally.
 
-echo "Fixing dnsmasq..."
+  Investigate and restore:
 
-sudo sed -i "s|address=/.devops.local/.*|address=/.devops.local/${INGRESS_IP}|" \
-  /etc/dnsmasq.d/devops.local.conf
+      https://bleater.devops.local
 
-sudo systemctl restart dnsmasq || true
+  The failure involves configuration drift across:
+  - dnsmasq wildcard DNS
+  - NGINX ingress routing
+  - MinIO configuration
+  - TLS configuration
+  - MinIO bucket permissions
 
+  Requirements:
 
-echo "Fix ingress routing..."
+  1. bleater.devops.local resolves to the active ingress controller IP.
+  2. /api routes to API gateway unchanged.
+  3. / routes to MinIO console service.
+  4. TLS secret reference is correct.
+  5. MinIO UI bucket allows anonymous read access.
 
-kubectl get ingress bleater -n bleater -o json | \
-jq '
-.spec.rules[0].http.paths |= map(
-  if .path == "/" then
-    .backend.service.name="bleater-minio" |
-    .backend.service.port.number=9001
-  else .
-  end
-)
-| .spec.tls[0].secretName="bleater-ui-tls"
-' | kubectl apply -f -
+  Constraints:
+  - Do NOT create new services.
+  - Modify existing resources only.
+  - Do NOT restart k3s or docker.
 
-
-echo "Fix MinIO bucket policy..."
-mc anonymous set download local/ui || true
-
-echo "All fixes applied."
+metadata:
+  category: devops
+  difficulty: hard

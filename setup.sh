@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -e
 
-echo "Injecting DNS + Ingress + MinIO drift..."
+echo "Injecting cascading drift..."
 
-########################################
-# WRONG DNSMASQ ENTRY
-########################################
+###################################
+# DNSMASQ WRONG WILDCARD
+###################################
 sudo mkdir -p /etc/dnsmasq.d
 
 cat <<EOF | sudo tee /etc/dnsmasq.d/devops.local.conf
@@ -15,9 +15,9 @@ EOF
 sudo systemctl restart dnsmasq || true
 
 
-########################################
-# CORRECT MINIO SERVICE (but ingress won't use it)
-########################################
+###################################
+# MINIO SERVICE (CORRECT ONE)
+###################################
 kubectl apply -f - <<EOF
 apiVersion: v1
 kind: Service
@@ -34,9 +34,9 @@ spec:
 EOF
 
 
-########################################
+###################################
 # BROKEN INGRESS
-########################################
+###################################
 kubectl apply -f - <<EOF
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -48,7 +48,6 @@ spec:
   - hosts:
     - bleater.devops.local
     secretName: old-tls-secret
-
   rules:
   - host: bleater.devops.local
     http:
@@ -60,7 +59,6 @@ spec:
             name: api-gateway
             port:
               number: 80
-
       - path: /
         pathType: Prefix
         backend:
@@ -71,10 +69,12 @@ spec:
 EOF
 
 
-########################################
-# PRIVATE BUCKET POLICY
-########################################
+###################################
+# MINIO PRIVATE POLICY
+###################################
+sleep 5
+
 mc alias set local http://bleater-minio:9000 minio minio123 || true
 mc anonymous set none local/ui || true
 
-echo "Drift injection complete."
+echo "Drift ready."
