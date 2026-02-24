@@ -3,9 +3,6 @@ set -e
 
 echo "Injecting cascading drift..."
 
-###################################
-# DNSMASQ WRONG WILDCARD
-###################################
 sudo mkdir -p /etc/dnsmasq.d
 
 cat <<EOF | sudo tee /etc/dnsmasq.d/devops.local.conf
@@ -14,10 +11,6 @@ EOF
 
 sudo systemctl restart dnsmasq || true
 
-
-###################################
-# MINIO SERVICE (CORRECT ONE)
-###################################
 kubectl apply -f - <<EOF
 apiVersion: v1
 kind: Service
@@ -33,10 +26,6 @@ spec:
     targetPort: 9001
 EOF
 
-
-###################################
-# BROKEN INGRESS
-###################################
 kubectl apply -f - <<EOF
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -68,13 +57,7 @@ spec:
               number: 9000
 EOF
 
-
-###################################
-# MINIO PRIVATE POLICY
-###################################
 sleep 5
 
 mc alias set local http://bleater-minio:9000 minio minio123 || true
 mc anonymous set none local/ui || true
-
-echo "Drift ready."

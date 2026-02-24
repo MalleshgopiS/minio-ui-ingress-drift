@@ -4,29 +4,28 @@ prompt: |
   The Bleater platform UI is partially broken.
 
   API endpoints under /api/* work correctly,
-  but the web UI fails externally.
+  but static UI assets fail externally.
 
-  Investigate and restore:
+  Restore access to:
 
       https://bleater.devops.local
 
-  The failure involves configuration drift across:
-  - dnsmasq wildcard DNS
-  - NGINX ingress routing
-  - MinIO configuration
-  - TLS configuration
-  - MinIO bucket permissions
+  Investigation hints:
+  - The MinIO console normally runs behind an ingress.
+  - The console service exposes a different port than the API.
+  - TLS certificates were recently rotated.
+  - External DNS may reference an outdated ingress IP.
+  - Bucket permissions may block anonymous UI access.
 
   Requirements:
 
   1. bleater.devops.local resolves to the active ingress controller IP.
-  2. /api routes to API gateway unchanged.
-  3. / routes to MinIO console service.
-  4. TLS secret reference is correct.
-  5. MinIO UI bucket allows anonymous read access.
+  2. /api continues routing to the API gateway.
+  3. / routes to the MinIO console service.
+  4. Ingress references the active TLS secret.
+  5. UI assets are publicly readable.
 
   Constraints:
-  - Do NOT create new services.
   - Modify existing resources only.
   - Do NOT restart k3s or docker.
 

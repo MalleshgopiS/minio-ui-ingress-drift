@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -e
 
-echo "Discover ingress IP..."
+echo "Discover ingress controller..."
 
 INGRESS_IP=$(kubectl get svc -n ingress-nginx \
-  -o jsonpath='{.items[0].spec.clusterIP}')
+  -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.clusterIP}{"\n"}{end}' \
+  | grep ingress | awk '{print $2}' | head -n1)
 
 echo "Fix DNS..."
-
 sudo sed -i "s|address=/.devops.local/.*|address=/.devops.local/${INGRESS_IP}|" \
   /etc/dnsmasq.d/devops.local.conf
 
@@ -15,7 +15,6 @@ sudo systemctl restart dnsmasq || true
 
 
 echo "Fix ingress..."
-
 kubectl get ingress bleater -n bleater -o json | jq '
 .spec.rules[0].http.paths |= map(
   if .path == "/" then
@@ -28,7 +27,7 @@ kubectl get ingress bleater -n bleater -o json | jq '
 ' | kubectl apply -f -
 
 
-echo "Fix MinIO policy..."
-mc anonymous set download local/ui || true
+echo "Fix bucket..."
+mc anonymous set download local/ui
 
 echo "Done."
