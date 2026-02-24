@@ -1,4 +1,5 @@
 import subprocess
+from apex_arena.models import GraderResult
 
 
 def run(cmd):
@@ -49,17 +50,17 @@ def check_ingress():
     return True, "All ingress values correct"
 
 
-# ⭐⭐⭐ CRITICAL FIX HERE ⭐⭐⭐
+# ⭐ FINAL CORRECT SIGNATURE
 def grade(context=None):
     ok, message = check_ingress()
 
     if ok:
-        return {
-            "score": 1.0,
-            "feedback": message
-        }
+        return GraderResult(
+            score=1.0,
+            feedback=message
+        )
 
-    return {
-        "score": 0.0,
-        "feedback": message
-    }
+    return GraderResult(
+        score=0.0,
+        feedback=message
+    )
