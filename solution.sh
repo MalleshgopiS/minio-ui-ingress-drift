@@ -1,41 +1,22 @@
-#!/usr/bin/env bash
-set -e
+#!/bin/bash
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
-echo "Fixing MinIO ingress drift..."
-
-INGRESS="bleater-ui"
-NS="bleater"
-
-if ! kubectl get ingress $INGRESS -n $NS >/dev/null 2>&1; then
-  echo "Ingress not found"
-  exit 1
-fi
-
-# Fix backend service name
-kubectl patch ingress $INGRESS -n $NS --type='json' -p='[
-  {
-    "op": "replace",
-    "path": "/spec/rules/0/http/paths/0/backend/service/name",
-    "value": "bleater-minio"
-  }
-]'
-
-# Fix backend port
-kubectl patch ingress $INGRESS -n $NS --type='json' -p='[
-  {
-    "op": "replace",
-    "path": "/spec/rules/0/http/paths/0/backend/service/port/number",
-    "value": 9001
-  }
-]'
-
-# Fix TLS secret
-kubectl patch ingress $INGRESS -n $NS --type='json' -p='[
-  {
-    "op": "replace",
-    "path": "/spec/tls/0/secretName",
-    "value": "bleater-minio-tls"
-  }
-]'
-
-echo "Ingress drift fixed successfully."
+cat <<EOF | kubectl apply -f -
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: minio-ui-ingress
+  namespace: minio
+spec:
+  rules:
+  - host: minio-ui.devops.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: minio-console
+            port:
+              number: 9001
+EOF

@@ -1,20 +1,17 @@
 id: minio-ui-ingress-drift
-
 prompt: |
-  The MinIO UI ingress named `bleater-ui` in the `bleater`
-  namespace has configuration drift.
-
-  Fix the ingress so that:
-
-  - Backend service name is `bleater-minio`
-  - Backend service port is `9001`
-  - TLS secret is `bleater-minio-tls`
-  - Host remains `minio.devops.local`
-
-  Only modify the existing ingress resource.
-  Do NOT create new resources.
-  Do NOT use interactive commands.
-
+  [Context]
+  You are a DevOps engineer maintaining the storage infrastructure for Bleater. 
+  The Minio object storage UI is supposed to be accessible via an Ingress at `minio-ui.devops.local`. 
+  
+  Currently, developers are reporting they cannot access the console. Preliminary checks suggest a configuration drift in the `minio` namespace.
+  
+  [TASK]
+  1. Identify the service name and port for the Minio Console (UI) in the `minio` namespace.
+  2. Create or fix an Ingress named `minio-ui-ingress` in the `minio` namespace.
+  3. The Ingress must route traffic from host `minio-ui.devops.local` to the correct service on the correct port.
+  
+  IMPORTANT: Do NOT use any interactive commands.
 metadata:
   category: kubernetes
   difficulty: easy
