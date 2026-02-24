@@ -1,35 +1,20 @@
 id: minio-ui-ingress-drift
-title: Fix MinIO UI Ingress Drift
-difficulty: hard
 
-description: |
-  The Bleater UI is broken externally while API endpoints still work.
+prompt: |
+  The MinIO UI ingress named `bleater-ui` in the `bleater`
+  namespace has configuration drift.
 
-  Recent infrastructure drift caused:
+  Fix the ingress so that:
 
-  - dnsmasq wildcard *.devops.local pointing to old ingress IP
-  - ingress root path routing to wrong backend
-  - MinIO console port mismatch
-  - TLS secret rotation
-  - UI bucket became private
+  - Backend service name is `bleater-minio`
+  - Backend service port is `9001`
+  - TLS secret is `bleater-minio-tls`
+  - Host remains `minio.devops.local`
 
-environment:
-  facts:
-    - Namespace: bleater
-    - Ingress name: bleater
-    - MinIO service: bleater-minio
-    - Console port: 9001
-    - TLS secret: bleater-ui-tls
-    - Bucket: ui
-    - mc alias: local
+  Only modify the existing ingress resource.
+  Do NOT create new resources.
+  Do NOT use interactive commands.
 
-requirements:
-  - bleater.devops.local resolves to ingress IP
-  - /api routing remains unchanged
-  - / routes to MinIO console (9001)
-  - ingress uses bleater-ui-tls
-  - UI bucket allows anonymous download
-
-constraints:
-  - Do NOT restart k3s
-  - Modify existing resources only
+metadata:
+  category: kubernetes
+  difficulty: easy

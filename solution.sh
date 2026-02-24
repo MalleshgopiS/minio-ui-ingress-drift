@@ -1,33 +1,41 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
-NS=bleater
-ING=bleater
+echo "Fixing MinIO ingress drift..."
 
-echo "Discover ingress IP..."
+INGRESS="bleater-ui"
+NS="bleater"
 
-ING_IP=$(kubectl get ingress $ING -n $NS \
-  -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+if ! kubectl get ingress $INGRESS -n $NS >/dev/null 2>&1; then
+  echo "Ingress not found"
+  exit 1
+fi
 
-echo "Ingress IP = $ING_IP"
+# Fix backend service name
+kubectl patch ingress $INGRESS -n $NS --type='json' -p='[
+  {
+    "op": "replace",
+    "path": "/spec/rules/0/http/paths/0/backend/service/name",
+    "value": "bleater-minio"
+  }
+]'
 
-echo "Fix DNS mapping..."
+# Fix backend port
+kubectl patch ingress $INGRESS -n $NS --type='json' -p='[
+  {
+    "op": "replace",
+    "path": "/spec/rules/0/http/paths/0/backend/service/port/number",
+    "value": 9001
+  }
+]'
 
-# Apex containers allow writing hosts without sudo
-echo "$ING_IP bleater.devops.local" >> /etc/hosts
+# Fix TLS secret
+kubectl patch ingress $INGRESS -n $NS --type='json' -p='[
+  {
+    "op": "replace",
+    "path": "/spec/tls/0/secretName",
+    "value": "bleater-minio-tls"
+  }
+]'
 
-
-echo "Fix ingress backend..."
-
-kubectl get ingress $ING -n $NS -o json | \
-jq '
-.spec.rules[0].http.paths[0].backend.service.name="bleater-minio" |
-.spec.rules[0].http.paths[0].backend.service.port.number=9001 |
-.spec.tls[0].secretName="bleater-ui-tls"
-' | kubectl apply -f -
-
-echo "Fix MinIO bucket policy..."
-
-mc anonymous set download local/ui
-
-echo "✅ Drift fixed"
+echo "Ingress drift fixed successfully."

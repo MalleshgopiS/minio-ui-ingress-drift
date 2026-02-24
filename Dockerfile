@@ -1,10 +1,4 @@
-FROM nebula-devops:1.0.0
-
-WORKDIR /task
-
-COPY setup.sh .
-COPY solution.sh .
-COPY grader.py .
-COPY task.yaml .
-
-RUN chmod +x setup.sh solution.sh
+FROM us-central1-docker.pkg.dev/bespokelabs/nebula-devops-registry/nebula-devops:1.0.0
+WORKDIR /workspace
+COPY setup.sh /workspace/setup.sh
+RUN chmod +x /workspace/setup.sh
