@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 import json
 import subprocess
-import sys
 import time
 
 NAMESPACE = "bleater"
 INGRESS = "bleater-ui"
 
+
+# ---------------------------------------------------
+# Helper
+# ---------------------------------------------------
 
 def run(cmd):
     return subprocess.run(
@@ -18,13 +21,11 @@ def run(cmd):
 
 
 # ---------------------------------------------------
-# Visible Validation Tests (Required for Quality PASS)
+# Visible Validation Tests
 # ---------------------------------------------------
 
 def validate_ingress_configuration():
-    """Validate ingress backend + TLS configuration"""
-
-    print("Running visible ingress validation checks...")
+    """Validate ingress backend + TLS + host configuration"""
 
     svc = run(
         f"kubectl get ingress {INGRESS} -n {NAMESPACE} "
@@ -41,6 +42,11 @@ def validate_ingress_configuration():
         "-o jsonpath='{.spec.tls[0].secretName}'"
     ).stdout.strip().strip("'")
 
+    host = run(
+        f"kubectl get ingress {INGRESS} -n {NAMESPACE} "
+        "-o jsonpath='{.spec.rules[0].host}'"
+    ).stdout.strip().strip("'")
+
     errors = []
 
     if svc != "bleater-minio":
@@ -52,16 +58,19 @@ def validate_ingress_configuration():
     if tls != "bleater-minio-tls":
         errors.append("TLS secret incorrect")
 
+    if host != "minio.devops.local":
+        errors.append("Host incorrect")
+
     return errors
 
 
 def wait_for_pods_ready(timeout=120):
-    print("Waiting for pods to stabilize...")
     start = time.time()
 
     while time.time() - start < timeout:
         result = run(
-            "kubectl get pods -A --no-headers | grep -v Running || true"
+            "kubectl get pods -A --no-headers | "
+            "grep -v Running | grep -v Completed || true"
         )
 
         if result.stdout.strip() == "":
@@ -73,12 +82,10 @@ def wait_for_pods_ready(timeout=120):
 
 
 # ---------------------------------------------------
-# External Nebula Test Suite
+# External Nebula Tests
 # ---------------------------------------------------
 
 def run_nebula_tests():
-    print("Running Nebula external test suite...")
-
     result = run("/root/tests/test_suite.sh")
 
     if result.returncode != 0:
@@ -100,41 +107,40 @@ def run_nebula_tests():
 
 
 # ---------------------------------------------------
-# MAIN GRADER
+# ⭐ REQUIRED BY APEX
 # ---------------------------------------------------
 
-def main():
+def grade():
+    """Entry point required by Apex MCP grader"""
 
     if not wait_for_pods_ready():
-        print(json.dumps({
+        return {
             "score": 0.0,
             "feedback": "Cluster not ready"
-        }))
-        sys.exit(0)
+        }
 
     visible_errors = validate_ingress_configuration()
 
     if visible_errors:
-        print(json.dumps({
+        return {
             "score": 0.0,
             "feedback": " | ".join(visible_errors)
-        }))
-        sys.exit(0)
+        }
 
     nebula_ok, msg = run_nebula_tests()
 
     if not nebula_ok:
-        print(json.dumps({
+        return {
             "score": 0.0,
             "feedback": msg
-        }))
-        sys.exit(0)
+        }
 
-    print(json.dumps({
+    return {
         "score": 1.0,
         "feedback": "✓ All visible + Nebula tests passed"
-    }))
+    }
 
 
+# Optional local execution
 if __name__ == "__main__":
-    main()
+    print(json.dumps(grade()))
