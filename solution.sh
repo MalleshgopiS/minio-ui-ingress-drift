@@ -1,33 +1,42 @@
 #!/usr/bin/env bash
 set -e
 
-echo "Discover ingress controller..."
+echo "Discover ingress controller IP..."
 
-INGRESS_IP=$(kubectl get svc -n ingress-nginx \
-  -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.clusterIP}{"\n"}{end}' \
-  | grep ingress | awk '{print $2}' | head -n1)
+INGRESS_IP=$(kubectl get ingress bleater -n bleater \
+  -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+
+echo "Ingress IP: $INGRESS_IP"
 
 echo "Fix DNS..."
-sudo sed -i "s|address=/.devops.local/.*|address=/.devops.local/${INGRESS_IP}|" \
-  /etc/dnsmasq.d/devops.local.conf
 
-sudo systemctl restart dnsmasq || true
+DNS_FILE="/etc/dnsmasq.d/devops.local.conf"
 
+sudo sed -i "s|address=/.devops.local/.*|address=/.devops.local/${INGRESS_IP}|" $DNS_FILE || \
+sed -i "s|address=/.devops.local/.*|address=/.devops.local/${INGRESS_IP}|" $DNS_FILE
 
-echo "Fix ingress..."
-kubectl get ingress bleater -n bleater -o json | jq '
-.spec.rules[0].http.paths |= map(
-  if .path == "/" then
-    .backend.service.name="bleater-minio" |
-    .backend.service.port.number=9001
-  else .
-  end
-)
-| .spec.tls[0].secretName="bleater-ui-tls"
-' | kubectl apply -f -
+# restart dnsmasq without sudo
+killall dnsmasq || true
+dnsmasq
 
+echo "Fix ingress routing..."
 
-echo "Fix bucket..."
+kubectl get ingress bleater -n bleater -o json \
+| jq '
+.spec.tls[0].secretName="bleater-ui-tls"
+| .spec.rules[0].http.paths |=
+  map(
+    if .path=="/"
+    then .backend.service.name="bleater-minio"
+    | .backend.service.port.number=9001
+    else .
+    end
+  )
+' \
+| kubectl apply -f -
+
+echo "Fix MinIO bucket policy..."
+
 mc anonymous set download local/ui
 
 echo "Done."
