@@ -1,29 +1,15 @@
 #!/usr/bin/env python3
 
-"""
-Grader for minio-ui-ingress-drift
-
-Validates that the existing Kubernetes ingress resource
-has been corrected according to the task description.
-
-Checks:
-- backend service name
-- backend service port
-- TLS secret
-- host value
-"""
-
 import subprocess
+import json
+import time
 from apex_arena._types import GradingResult
 
 
-EXPECTED_HOST = "minio.devops.local"
-EXPECTED_SERVICE = "bleater-minio"
-EXPECTED_PORT = "9001"
-EXPECTED_TLS = "bleater-minio-tls"
-
-
-def run(cmd: str):
+# -----------------------------
+# helper runner
+# -----------------------------
+def run(cmd):
     result = subprocess.run(
         cmd,
         shell=True,
@@ -33,28 +19,67 @@ def run(cmd: str):
     return result.returncode, result.stdout.strip(), result.stderr.strip()
 
 
-def get_ingress_values():
-    cmd = """
-    kubectl get ingress bleater-ui -n bleater \
-      -o jsonpath='{.spec.rules[0].host}{"|"}{.spec.rules[0].http.paths[0].backend.service.name}{"|"}{.spec.rules[0].http.paths[0].backend.service.port.number}{"|"}{.spec.tls[0].secretName}'
-    """
+# -----------------------------
+# wait for cluster stability
+# -----------------------------
+def wait_for_pods_ready(timeout=180):
+    start = time.time()
 
+    while time.time() - start < timeout:
+        code, out, _ = run(
+            "kubectl get pods -n bleater "
+            "--no-headers "
+            "-o custom-columns=':status.conditions[?(@.type==\"Ready\")].status'"
+        )
+
+        if code == 0 and out:
+            statuses = [s.strip() for s in out.split("\n") if s.strip()]
+            if statuses and all(s == "True" for s in statuses):
+                return True
+
+        time.sleep(5)
+
+    return False
+
+
+# -----------------------------
+# ingress validation
+# -----------------------------
+def validate_ingress():
+
+    wait_for_pods_ready()
+
+    cmd = """
+kubectl get ingress bleater-ui -n bleater -o jsonpath='
+{.spec.rules[0].host}|\
+{.spec.rules[0].http.paths[0].backend.service.name}|\
+{.spec.rules[0].http.paths[0].backend.service.port.number}|\
+{.spec.tls[0].secretName}'
+"""
     code, out, err = run(cmd)
 
     if code != 0 or not out:
-        return None, f"Ingress not found or kubectl error: {err}"
+        return None, f"Failed to read ingress: {err}"
 
-    parts = out.split("|")
+    host, service, port, tls = out.split("|")
 
-    if len(parts) != 4:
-        return None, "Unexpected ingress structure"
+    # --- FIXED CHECKS (partial scoring) ---
+    checks = {
+        "host_correct": host == "minio.devops.local",
+        "service_name_correct": service == "bleater-minio",
+        "service_port_correct": int(port) == 9001,  # FIX: integer comparison
+        "tls_secret_correct": tls == "bleater-minio-tls",
+    }
 
-    return parts, None
+    return checks, None
 
 
+# -----------------------------
+# grading entrypoint
+# -----------------------------
 def grade(transcript: str) -> GradingResult:
 
-    values, error = get_ingress_values()
+    checks, error = validate_ingress()
 
     if error:
         return GradingResult(
@@ -64,33 +89,21 @@ def grade(transcript: str) -> GradingResult:
             feedback=error,
         )
 
-    host, service, port, tls = values
+    passed = sum(checks.values())
+    total = len(checks)
 
-    failures = []
+    score = passed / total
 
-    if host != EXPECTED_HOST:
-        failures.append(f"host expected {EXPECTED_HOST}, got {host}")
-
-    if service != EXPECTED_SERVICE:
-        failures.append(f"service expected {EXPECTED_SERVICE}, got {service}")
-
-    if port != EXPECTED_PORT:
-        failures.append(f"port expected {EXPECTED_PORT}, got {port}")
-
-    if tls != EXPECTED_TLS:
-        failures.append(f"tls expected {EXPECTED_TLS}, got {tls}")
-
-    if failures:
-        return GradingResult(
-            score=0.0,
-            subscores={"ingress_validation": 0.0},
-            weights={"ingress_validation": 1.0},
-            feedback=" | ".join(failures),
-        )
+    feedback = f"{passed}/{total} ingress fields correct"
 
     return GradingResult(
-        score=1.0,
-        subscores={"ingress_validation": 1.0},
-        weights={"ingress_validation": 1.0},
-        feedback="Ingress configuration correct",
+        score=score,
+        subscores=checks,
+        weights={
+            "host_correct": 0.25,
+            "service_name_correct": 0.25,
+            "service_port_correct": 0.25,
+            "tls_secret_correct": 0.25,
+        },
+        feedback=feedback,
     )

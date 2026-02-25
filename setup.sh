@@ -1,6 +1,9 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -e
 
+echo "Creating drifted MinIO ingress..."
+
+# Create intentionally broken ingress (drifted state)
 kubectl apply -f - <<EOF
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -8,6 +11,10 @@ metadata:
   name: bleater-ui
   namespace: bleater
 spec:
+  tls:
+  - hosts:
+    - minio.devops.local
+    secretName: wrong-secret
   rules:
   - host: minio.devops.local
     http:
@@ -19,8 +26,6 @@ spec:
             name: wrong-service
             port:
               number: 80
-  tls:
-  - hosts:
-    - minio.devops.local
-    secretName: wrong-secret
 EOF
+
+echo "Drifted ingress created successfully."
