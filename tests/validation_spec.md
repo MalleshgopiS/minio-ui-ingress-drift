@@ -1,57 +1,116 @@
 # Validation Specification
 
-This task validates correction of configuration drift in the
-Kubernetes ingress resource `bleater-ui` located in the
-`bleater` namespace.
+This task validates correction of configuration drift in the Kubernetes
+Ingress resource `bleater-ui` located in the `bleater` namespace.
 
-The grader performs direct validation against Kubernetes
-cluster state using `kubectl`.
+The environment is initialized automatically using `setup.sh`
+before the agent begins execution.
 
-## Environment Setup
+---
 
-The evaluation container executes `setup.sh` before grading.
+## Initial Environment State (Setup)
 
-The setup script creates a reproducible drifted environment:
+During setup:
 
-- Namespace: `bleater`
-- Ingress: `bleater-ui`
-- Incorrect backend service configuration
-- Incorrect TLS configuration
+- The `bleater` namespace is created if it does not exist.
+- A placeholder backend Service named `wrong-service` is created.
+- A placeholder TLS secret named `wrong-secret` is created.
+- An Ingress resource `bleater-ui` is created with intentional configuration drift.
 
-The agent must repair the existing ingress resource.
+The ingress initially contains incorrect values:
+
+| Field | Drifted Value |
+|------|---------------|
+| Backend Service | `wrong-service` |
+| Backend Port | `80` |
+| TLS Secret | `wrong-secret` |
+| Host | `minio.devops.local` (correct and must remain unchanged) |
+
+The setup process also records the original Kubernetes resource UID:
+
+`/tmp/bleater-ui-original-uid`
+
+This UID is later used by the grader to ensure the resource was modified
+instead of deleted and recreated.
+
+---
 
 ## Validations Performed
 
-The grader validates the following fields:
+The grader validates the live Kubernetes cluster state using `kubectl`.
 
-1. Host  
-Expected value: `minio.devops.local`
+### 1. Host
 
-2. Backend Service Name  
-Expected value: `bleater-minio`
+Expected value:
 
-3. Backend Service Port  
-Expected value: `9001`
+`minio.devops.local`
 
-4. TLS Secret  
-Expected value: `bleater-minio-tls`
+### 2. Backend Service Name
+
+Expected value:
+
+`bleater-minio`
+
+### 3. Backend Service Port
+
+Expected value:
+
+`9001`
+
+### 4. TLS Secret
+
+Expected value:
+
+`bleater-minio-tls`
+
+### 5. Resource Preservation (Anti-Cheat)
+
+The grader verifies that:
+
+- The ingress UID matches the original UID captured during setup.
+- The agent modified the existing resource.
+- The resource was NOT deleted and recreated.
+
+---
 
 ## Validation Method
 
-The grader executes:
+The grader executes commands similar to:
 
 kubectl get ingress bleater-ui -n bleater -o jsonpath=...
 
-and compares returned values with expected configuration.
+Values are extracted directly from cluster state and compared against
+expected configuration.
+
+---
+
+## Scoring
+
+Each validation contributes equally to the final score:
+
+- Host correct
+- Service name correct
+- Port correct
+- TLS secret correct
+- Resource not recreated
+
+Final score = passed_checks / total_checks.
+
+---
 
 ## Pass Criteria
 
-Each correct field contributes 0.25 to the final score.
+All configuration values must match expected values and the ingress UID
+must remain unchanged.
 
-Full score (1.0) requires all four values to match.
+---
 
-## Security & Anti-Cheating
+## Security Model
 
-The grader verifies that the original ingress resource
-was modified rather than deleted and recreated by
-checking the Kubernetes resource UID.
+Validation is performed directly against Kubernetes cluster state.
+
+- No hidden tests
+- No external services
+- No agent-modifiable grading files
+
+The only way to pass is to correctly repair the ingress configuration.
