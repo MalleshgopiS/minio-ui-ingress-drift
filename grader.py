@@ -5,32 +5,40 @@ import time
 from apex_arena._types import GradingResult
 
 
-# ---------------------------------------------------
-# Helper runner
-# ---------------------------------------------------
+# ==================================================
+# Helper command runner
+# ==================================================
 
-def run(cmd):
-    result = subprocess.run(
-        cmd,
-        shell=True,
-        capture_output=True,
-        text=True,
-    )
-    return result.returncode, result.stdout.strip(), result.stderr.strip()
+def run(cmd: str):
+    """Execute shell command safely."""
+    try:
+        result = subprocess.run(
+            cmd,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        return result.returncode, result.stdout.strip(), result.stderr.strip()
+    except Exception as e:
+        return -1, "", str(e)
 
 
-# ---------------------------------------------------
+# ==================================================
 # Wait for cluster stability
-# ---------------------------------------------------
+# ==================================================
 
-def wait_for_cluster(timeout=180):
+def wait_for_cluster(timeout=120):
+    """
+    Wait until ingress resource becomes readable.
+    Prevents race conditions during cluster startup.
+    """
     start = time.time()
 
     while time.time() - start < timeout:
-        code, out, _ = run(
-            "kubectl get pods -n bleater --no-headers 2>/dev/null"
+        code, _, _ = run(
+            "kubectl get ingress bleater-ui -n bleater"
         )
-
         if code == 0:
             return True
 
@@ -39,25 +47,48 @@ def wait_for_cluster(timeout=180):
     return False
 
 
-# ---------------------------------------------------
-# Anti-cheat: capture ingress UID
-# ---------------------------------------------------
+# ==================================================
+# UID helpers (ANTI-CHEAT)
+# ==================================================
 
-def get_ingress_uid():
+def get_current_uid():
+    """Fetch current ingress UID."""
     code, out, _ = run(
         "kubectl get ingress bleater-ui -n bleater "
-        "-o jsonpath='{.metadata.uid}' 2>/dev/null"
+        "-o jsonpath='{.metadata.uid}'"
     )
-    return out.strip().replace("'", "") if code == 0 else None
+
+    if code != 0:
+        return None
+
+    return out.replace("'", "").strip()
 
 
-# ---------------------------------------------------
-# Validation Logic
-# ---------------------------------------------------
+def get_original_uid():
+    """
+    Read UID captured during setup.sh.
+    This represents the ingress BEFORE agent actions.
+    """
+    try:
+        with open("/tmp/bleater-ui-original-uid", "r") as f:
+            return f.read().strip()
+    except Exception:
+        return None
 
-def validate_ingress():
 
-    cmd = (
+# ==================================================
+# Main grading logic
+# ==================================================
+
+def grade(transcript: str) -> GradingResult:
+
+    wait_for_cluster()
+
+    # --------------------------------------------------
+    # Read ingress configuration
+    # --------------------------------------------------
+
+    code, out, err = run(
         "kubectl get ingress bleater-ui -n bleater "
         "-o jsonpath='{.spec.rules[0].host}|"
         "{.spec.rules[0].http.paths[0].backend.service.name}|"
@@ -65,63 +96,61 @@ def validate_ingress():
         "{.spec.tls[0].secretName}'"
     )
 
-    code, out, err = run(cmd)
-
     if code != 0 or not out:
-        return 0.0, ["✗ Unable to read ingress resource"]
+        return GradingResult(
+            score=0.0,
+            feedback="Failed to read ingress configuration",
+        )
 
-    parts = out.replace("'", "").split("|")
+    try:
+        host, service, port, tls = out.replace("'", "").split("|")
+    except ValueError:
+        return GradingResult(
+            score=0.0,
+            feedback="Unexpected ingress output format",
+        )
 
-    if len(parts) != 4:
-        return 0.0, ["✗ Unexpected ingress output format"]
-
-    host, service, port, tls = parts
+    # --------------------------------------------------
+    # Validation checks
+    # --------------------------------------------------
 
     checks = {
         "host_correct": host == "minio.devops.local",
-        "service_name_correct": service == "bleater-minio",
-        "service_port_correct": False,
-        "tls_secret_correct": tls == "bleater-minio-tls",
+        "service_correct": service == "bleater-minio",
+        "port_correct": str(port) == "9001",
+        "tls_correct": tls == "bleater-minio-tls",
     }
 
-    # Safe port parsing
-    try:
-        checks["service_port_correct"] = int(port) == 9001
-    except Exception:
-        checks["service_port_correct"] = False
+    # --------------------------------------------------
+    # Anti-cheat: ensure ingress NOT recreated
+    # --------------------------------------------------
 
-    score = sum(checks.values()) * 0.25
+    original_uid = get_original_uid()
+    current_uid = get_current_uid()
 
-    feedback = []
-    for k, v in checks.items():
-        feedback.append(f"{'✓' if v else '✗'} {k}")
+    uid_preserved = (
+        original_uid is not None
+        and current_uid is not None
+        and original_uid == current_uid
+    )
 
-    return score, feedback
+    checks["resource_not_recreated"] = uid_preserved
 
+    # --------------------------------------------------
+    # Scoring
+    # --------------------------------------------------
 
-# ---------------------------------------------------
-# Main grading entrypoint
-# ---------------------------------------------------
+    total_checks = len(checks)
+    passed = sum(checks.values())
+    score = passed / total_checks
 
-def grade(transcript: str) -> GradingResult:
-
-    wait_for_cluster()
-
-    # Capture UID BEFORE agent actions
-    original_uid = get_ingress_uid()
-
-    score, feedback = validate_ingress()
-
-    # Anti-cheat validation
-    new_uid = get_ingress_uid()
-
-    if original_uid and new_uid and original_uid != new_uid:
-        feedback.append("✗ Ingress was recreated (new resource detected)")
-        score = 0.0
+    feedback = ", ".join(
+        f"{k}:{'✓' if v else '✗'}" for k, v in checks.items()
+    )
 
     return GradingResult(
         score=score,
-        subscores={"ingress_validation": score},
-        weights={"ingress_validation": 1.0},
-        feedback=" | ".join(feedback),
+        subscores=checks,
+        weights={k: 1 / total_checks for k in checks},
+        feedback=feedback,
     )

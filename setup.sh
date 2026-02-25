@@ -1,53 +1,63 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
-###############################################################################
-# TASK INITIALIZATION SCRIPT
-#
-# PURPOSE
-# -------
-# This script prepares the Kubernetes environment for the
-# "minio-ui-ingress-drift" task.
-#
-# It intentionally creates a MISCONFIGURED ("drifted") ingress resource.
-#
-# INITIAL DRIFTED STATE
-# ---------------------
-# Resource:
-#   ingress: bleater-ui
-#   namespace: bleater
-#
-# Incorrect values created intentionally:
-#
-#   Backend Service Name : wrong-service
-#   Backend Service Port : 80
-#   TLS Secret           : wrong-secret
-#
-# Correct values expected AFTER agent fixes:
-#
-#   Backend Service Name : bleater-minio
-#   Backend Service Port : 9001
-#   TLS Secret           : bleater-minio-tls
-#   Host                 : minio.devops.local (UNCHANGED)
-#
-# TASK REQUIREMENT
-# ----------------
-# Agent must MODIFY the existing ingress resource.
-# Agent must NOT delete or recreate resources.
-#
-###############################################################################
+echo "========================================"
+echo "Setting up MinIO UI Ingress Drift Task"
+echo "========================================"
 
-echo "Creating namespace..."
-kubectl create namespace bleater --dry-run=client -o yaml | kubectl apply -f -
+NAMESPACE="bleater"
+INGRESS_NAME="bleater-ui"
 
-echo "Creating drifted ingress..."
+# --------------------------------------------------
+# Ensure namespace exists
+# --------------------------------------------------
 
-cat <<EOF | kubectl apply -f -
+kubectl get ns ${NAMESPACE} >/dev/null 2>&1 || \
+kubectl create namespace ${NAMESPACE}
+
+echo "Namespace ready: ${NAMESPACE}"
+
+# --------------------------------------------------
+# Create placeholder backend service
+# (needed so ingress is valid)
+# --------------------------------------------------
+
+kubectl apply -n ${NAMESPACE} -f - <<EOF
+apiVersion: v1
+kind: Service
+metadata:
+  name: wrong-service
+spec:
+  selector:
+    app: dummy
+  ports:
+    - port: 80
+      targetPort: 80
+EOF
+
+echo "Dummy service created"
+
+# --------------------------------------------------
+# Create TLS secret placeholder
+# --------------------------------------------------
+
+kubectl create secret tls wrong-secret \
+  --cert=/etc/ssl/certs/ssl-cert-snakeoil.pem \
+  --key=/etc/ssl/private/ssl-cert-snakeoil.key \
+  -n ${NAMESPACE} \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+echo "Dummy TLS secret created"
+
+# --------------------------------------------------
+# Create DRIFTED ingress (INTENTIONALLY WRONG)
+# --------------------------------------------------
+
+kubectl apply -n ${NAMESPACE} -f - <<EOF
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: bleater-ui
-  namespace: bleater
+  name: ${INGRESS_NAME}
 spec:
   tls:
   - hosts:
@@ -66,4 +76,32 @@ spec:
               number: 80
 EOF
 
-echo "Drifted ingress created successfully."
+echo "Drifted ingress created"
+
+# --------------------------------------------------
+# Wait for ingress availability
+# --------------------------------------------------
+
+echo "Waiting for ingress readiness..."
+
+for i in {1..20}; do
+  if kubectl get ingress ${INGRESS_NAME} -n ${NAMESPACE} >/dev/null 2>&1; then
+    break
+  fi
+  sleep 2
+done
+
+# --------------------------------------------------
+# Capture ORIGINAL UID (ANTI-CHEAT BASELINE)
+# --------------------------------------------------
+
+kubectl get ingress ${INGRESS_NAME} -n ${NAMESPACE} \
+  -o jsonpath='{.metadata.uid}' \
+  > /tmp/bleater-ui-original-uid
+
+echo "Original ingress UID saved:"
+cat /tmp/bleater-ui-original-uid
+
+echo "========================================"
+echo "Setup complete — drift ready for fixing"
+echo "========================================"
