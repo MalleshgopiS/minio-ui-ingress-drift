@@ -6,22 +6,16 @@ echo "Setting up MinIO UI Ingress Drift Task"
 echo "========================================"
 
 NAMESPACE="bleater"
-INGRESS_NAME="bleater-ui"
 
 # --------------------------------------------------
-# Ensure namespace exists
+# Namespace
 # --------------------------------------------------
-
-kubectl get ns ${NAMESPACE} >/dev/null 2>&1 || \
-kubectl create namespace ${NAMESPACE}
-
+kubectl get ns ${NAMESPACE} >/dev/null 2>&1 || kubectl create ns ${NAMESPACE}
 echo "Namespace ready: ${NAMESPACE}"
 
 # --------------------------------------------------
-# Create placeholder backend service
-# (needed so ingress is valid)
+# Dummy backend service (WRONG service)
 # --------------------------------------------------
-
 kubectl apply -n ${NAMESPACE} -f - <<EOF
 apiVersion: v1
 kind: Service
@@ -38,26 +32,33 @@ EOF
 echo "Dummy service created"
 
 # --------------------------------------------------
-# Create TLS secret placeholder
+# Generate TLS certs (NEBULA SAFE)
 # --------------------------------------------------
+TMP_DIR=$(mktemp -d)
+
+openssl req -x509 -nodes -days 365 \
+  -newkey rsa:2048 \
+  -keyout ${TMP_DIR}/tls.key \
+  -out ${TMP_DIR}/tls.crt \
+  -subj "/CN=minio.devops.local"
+
+kubectl delete secret wrong-secret -n ${NAMESPACE} --ignore-not-found
 
 kubectl create secret tls wrong-secret \
-  --cert=/etc/ssl/certs/ssl-cert-snakeoil.pem \
-  --key=/etc/ssl/private/ssl-cert-snakeoil.key \
-  -n ${NAMESPACE} \
-  --dry-run=client -o yaml | kubectl apply -f -
+  --cert=${TMP_DIR}/tls.crt \
+  --key=${TMP_DIR}/tls.key \
+  -n ${NAMESPACE}
 
 echo "Dummy TLS secret created"
 
 # --------------------------------------------------
-# Create DRIFTED ingress (INTENTIONALLY WRONG)
+# Create DRIFTED ingress
 # --------------------------------------------------
-
 kubectl apply -n ${NAMESPACE} -f - <<EOF
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: ${INGRESS_NAME}
+  name: bleater-ui
 spec:
   tls:
   - hosts:
@@ -79,29 +80,14 @@ EOF
 echo "Drifted ingress created"
 
 # --------------------------------------------------
-# Wait for ingress availability
+# Save ORIGINAL UID (ANTI-CHEAT)
 # --------------------------------------------------
+UID=$(kubectl get ingress bleater-ui -n ${NAMESPACE} -o jsonpath='{.metadata.uid}')
 
-echo "Waiting for ingress readiness..."
+echo "${UID}" > /tmp/bleater-ui-original-uid
 
-for i in {1..20}; do
-  if kubectl get ingress ${INGRESS_NAME} -n ${NAMESPACE} >/dev/null 2>&1; then
-    break
-  fi
-  sleep 2
-done
-
-# --------------------------------------------------
-# Capture ORIGINAL UID (ANTI-CHEAT BASELINE)
-# --------------------------------------------------
-
-kubectl get ingress ${INGRESS_NAME} -n ${NAMESPACE} \
-  -o jsonpath='{.metadata.uid}' \
-  > /tmp/bleater-ui-original-uid
-
-echo "Original ingress UID saved:"
-cat /tmp/bleater-ui-original-uid
+echo "Original UID stored"
 
 echo "========================================"
-echo "Setup complete — drift ready for fixing"
+echo "Setup complete"
 echo "========================================"
