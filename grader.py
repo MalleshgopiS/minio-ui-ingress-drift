@@ -1,147 +1,96 @@
 #!/usr/bin/env python3
 
+"""
+Grader for minio-ui-ingress-drift
+
+Validates that the existing Kubernetes ingress resource
+has been corrected according to the task description.
+
+Checks:
+- backend service name
+- backend service port
+- TLS secret
+- host value
+"""
+
 import subprocess
-import json
-import os
-import time
 from apex_arena._types import GradingResult
 
 
-# ---------------------------
-# Command Runner
-# ---------------------------
-
-def run(cmd, timeout=60):
-    try:
-        result = subprocess.run(
-            cmd,
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-        return result.returncode, result.stdout.strip(), result.stderr.strip()
-    except subprocess.TimeoutExpired:
-        return -1, "", "Command timeout"
-    except Exception as e:
-        return -1, "", str(e)
+EXPECTED_HOST = "minio.devops.local"
+EXPECTED_SERVICE = "bleater-minio"
+EXPECTED_PORT = "9001"
+EXPECTED_TLS = "bleater-minio-tls"
 
 
-# ---------------------------
-# Cluster Stabilization
-# ---------------------------
-
-def wait_for_pods_ready(timeout=180):
-    """
-    Wait until all pods in bleater namespace are Ready.
-    Prevents non-deterministic test failures.
-    """
-    start = time.time()
-
-    while time.time() - start < timeout:
-        code, out, _ = run(
-            "kubectl get pods -n bleater "
-            "--no-headers "
-            "-o custom-columns=':status.conditions[?(@.type==\"Ready\")].status'"
-        )
-
-        if code == 0 and out:
-            statuses = [s.strip() for s in out.split("\n") if s.strip()]
-            if statuses and all(s == "True" for s in statuses):
-                return True
-
-        time.sleep(5)
-
-    return False
+def run(cmd: str):
+    result = subprocess.run(
+        cmd,
+        shell=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode, result.stdout.strip(), result.stderr.strip()
 
 
-# ---------------------------
-# Nebula Test Suite Runner
-# ---------------------------
-
-def run_test_suite():
-    """
-    Nebula validation entrypoint.
-
-    Test suite validates:
-      - DNS routing
-      - Ingress correctness
-      - MinIO access
-      - UI loads
-      - API health
+def get_ingress_values():
+    cmd = """
+    kubectl get ingress bleater-ui -n bleater \
+      -o jsonpath='{.spec.rules[0].host}{"|"}{.spec.rules[0].http.paths[0].backend.service.name}{"|"}{.spec.rules[0].http.paths[0].backend.service.port.number}{"|"}{.spec.tls[0].secretName}'
     """
 
-    test_script = "/root/tests/test_suite.sh"
-    results_file = "/root/tests/test_results.json"
+    code, out, err = run(cmd)
 
-    if not os.path.exists(test_script):
-        return False, "Test suite missing"
+    if code != 0 or not out:
+        return None, f"Ingress not found or kubectl error: {err}"
 
-    # Wait for infra convergence
-    wait_for_pods_ready()
+    parts = out.split("|")
 
-    try:
-        subprocess.run(
-            ["bash", test_script],
-            cwd="/root/tests",
-            timeout=300,
-            capture_output=True,
-            text=True,
-        )
-    except subprocess.TimeoutExpired:
-        return False, "Test suite timeout"
+    if len(parts) != 4:
+        return None, "Unexpected ingress structure"
 
-    if not os.path.exists(results_file):
-        return False, "Test results not generated"
+    return parts, None
 
-    try:
-        with open(results_file) as f:
-            results = json.load(f)
-    except Exception:
-        return False, "Invalid test_results.json"
-
-    if not isinstance(results, dict):
-        return False, "Malformed test_results.json"
-
-    total = len(results)
-    passed = sum(1 for v in results.values() if v == 1)
-
-    if total == 0:
-        return False, "No tests executed"
-
-    if passed == total:
-        return True, f"All {total} tests passed"
-
-    failed = [k for k, v in results.items() if v == 0]
-
-    return False, f"{passed}/{total} tests passed. Failed: {', '.join(failed)}"
-
-
-# ---------------------------
-# Main Grade Entrypoint
-# ---------------------------
 
 def grade(transcript: str) -> GradingResult:
-    """
-    Apex Arena grading entrypoint.
-    """
 
-    feedback_parts = []
+    values, error = get_ingress_values()
 
-    suite_ok, message = run_test_suite()
+    if error:
+        return GradingResult(
+            score=0.0,
+            subscores={"ingress_validation": 0.0},
+            weights={"ingress_validation": 1.0},
+            feedback=error,
+        )
 
-    if suite_ok:
-        score = 1.0
-        feedback_parts.append(f"✓ {message}")
-    else:
-        score = 0.0
-        feedback_parts.append(f"✗ {message}")
+    host, service, port, tls = values
 
-    feedback = " | ".join(feedback_parts)
+    failures = []
+
+    if host != EXPECTED_HOST:
+        failures.append(f"host expected {EXPECTED_HOST}, got {host}")
+
+    if service != EXPECTED_SERVICE:
+        failures.append(f"service expected {EXPECTED_SERVICE}, got {service}")
+
+    if port != EXPECTED_PORT:
+        failures.append(f"port expected {EXPECTED_PORT}, got {port}")
+
+    if tls != EXPECTED_TLS:
+        failures.append(f"tls expected {EXPECTED_TLS}, got {tls}")
+
+    if failures:
+        return GradingResult(
+            score=0.0,
+            subscores={"ingress_validation": 0.0},
+            weights={"ingress_validation": 1.0},
+            feedback=" | ".join(failures),
+        )
 
     return GradingResult(
-        score=score,
-        subscores={"nebula_validation": score},
-        weights={"nebula_validation": 1.0},
-        feedback=feedback,
+        score=1.0,
+        subscores={"ingress_validation": 1.0},
+        weights={"ingress_validation": 1.0},
+        feedback="Ingress configuration correct",
     )
