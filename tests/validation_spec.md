@@ -1,28 +1,42 @@
 # Validation Specification
 
-This task validates ingress drift recovery using two layers:
+This task validates correction of configuration drift
+in the Kubernetes ingress resource `bleater-ui`
+within the `bleater` namespace.
 
-## 1. Visible Tests (grader.py)
+The grader performs direct cluster validation using kubectl.
 
-The grader directly validates:
+## Validations Performed
 
-- ingress backend service name
-- ingress backend service port
-- TLS secret configuration
-- cluster pod readiness
+The grader checks the following fields:
 
-## 2. External Nebula Tests
+1. Host
+   - Expected: `minio.devops.local`
 
-Additional platform tests are executed from:
+2. Backend Service Name
+   - Expected: `bleater-minio`
 
-    /root/tests/test_suite.sh
+3. Backend Service Port
+   - Expected: `9001`
 
-These verify:
+4. TLS Secret
+   - Expected: `bleater-minio-tls`
 
-- DNS routing
-- MinIO UI loading
-- static asset delivery
-- API health
-- observability stack health
+## Validation Method
 
-External tests are embedded in the base image to prevent tampering.
+The grader executes:
+
+kubectl get ingress bleater-ui -n bleater -o jsonpath=...
+
+and compares returned values against expected configuration.
+
+## Pass Criteria
+
+All values must exactly match expected configuration.
+
+If any field differs, grading fails.
+
+## Security
+
+Validation is performed directly against Kubernetes cluster state.
+No external scripts or hidden tests are used.
