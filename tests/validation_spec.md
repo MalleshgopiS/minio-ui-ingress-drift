@@ -1,71 +1,113 @@
 # Validation Specification
 
-This task validates correction of configuration drift
-in the Kubernetes ingress resource `bleater-ui`
-within the `bleater` namespace.
+This task validates correction of configuration drift in the Kubernetes ingress resource **bleater-ui** located in the **bleater** namespace.
+
+The grader validates the final Kubernetes cluster state directly using `kubectl`.
 
 ---
 
-## Environment Initialization
+## Environment Setup (setup.sh)
 
-Before grading begins, the environment is initialized
-by executing `setup.sh`.
+Before evaluation begins, the container automatically runs the `setup.sh` script.
 
-The setup script prepares the Kubernetes cluster and
-creates a deliberately drifted ingress configuration
-that the agent must repair.
+The setup script prepares the Kubernetes environment and creates the initial **drifted ingress configuration** required for the task.
 
-The following incorrect values are introduced:
+The setup process performs the following actions:
 
-- Backend service name → `wrong-service`
-- Backend service port → `80`
-- TLS secret → `wrong-secret`
+- Creates the namespace `bleater`
+- Ensures required backend services exist
+- Creates the ingress resource `bleater-ui`
+- Applies intentionally incorrect configuration values to simulate configuration drift
 
-The host remains:
+### Initial Drifted Configuration
 
-- `minio.devops.local`
+| Field | Drifted Value |
+|------|---------------|
+| Host | minio.devops.local |
+| Backend Service Name | wrong-service |
+| Backend Service Port | 80 |
+| TLS Secret | wrong-secret |
 
-The agent must modify the existing ingress resource
-to restore the correct configuration.
+This guarantees every evaluation starts from a reproducible misconfigured state that the agent must repair.
+
+The agent must **modify the existing ingress resource only** and must **not create new Kubernetes resources**.
 
 ---
 
 ## Validations Performed
 
-The grader checks the following fields:
+The grader validates the following ingress fields.
 
-1. Host  
-   Expected: `minio.devops.local`
+### Host
+Expected value: minio.devops.local
 
-2. Backend Service Name  
-   Expected: `bleater-minio`
+### Backend Service Name
+Expected value: bleater-minio
 
-3. Backend Service Port  
-   Expected: `9001`
+### Backend Service Port
+Expected value: 9001
 
-4. TLS Secret  
-   Expected: `bleater-minio-tls`
+### TLS Secret
+Expected value: bleater-minio-tls
 
 ---
 
 ## Validation Method
 
-The grader executes:
+The grader retrieves ingress values directly from the Kubernetes cluster using:
 
 kubectl get ingress bleater-ui -n bleater -o jsonpath=...
 
-and compares returned values against expected configuration.
+Values are extracted using Kubernetes JSONPath queries and compared against expected configuration values.
+
+No regex parsing or hidden validation scripts are used.
+
+---
+
+## Scoring Logic
+
+Each validation contributes **0.25** to the final score:
+
+| Check | Score |
+|------|------|
+| Host correct | 0.25 |
+| Service name correct | 0.25 |
+| Service port correct | 0.25 |
+| TLS secret correct | 0.25 |
+
+Maximum score: **1.0**
+
+Partial credit is awarded when only some fields are corrected.
 
 ---
 
 ## Pass Criteria
 
-Each field is validated independently.
-All values must match expected configuration for full score.
+A full score (1.0) is awarded when all four fields match the expected configuration exactly.
+
+If any field differs, partial credit is assigned based on the number of successful validations.
 
 ---
 
-## Security
+## Security and Anti-Cheating
 
-Validation is performed directly against Kubernetes cluster state.
-No external scripts or hidden tests are used.
+Validation is performed directly against the live Kubernetes cluster state.
+
+- The grader reads real resource configuration.
+- Agents cannot modify grader logic.
+- No hidden scripts or external internet access are available.
+- Passing requires actual modification of the ingress resource.
+
+The grader validates the final system state rather than the commands used.
+
+---
+
+## Reproducibility
+
+The environment is deterministic because:
+
+- A pinned base image (`nebula-devops:1.0.0`) is used.
+- `setup.sh` recreates the same drifted ingress each run.
+- Validation uses direct Kubernetes state inspection.
+
+This ensures consistent evaluation results across executions.
