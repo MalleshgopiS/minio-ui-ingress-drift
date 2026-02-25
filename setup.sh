@@ -2,31 +2,45 @@
 set -e
 
 ###############################################################################
-# SETUP SCRIPT
+# TASK INITIALIZATION SCRIPT
 #
-# Purpose:
-#   Initializes the task environment by creating a DRIFTED ingress resource.
+# PURPOSE
+# -------
+# This script prepares the Kubernetes environment for the
+# "minio-ui-ingress-drift" task.
 #
-# Initial (Incorrect) State Created:
-#   - ingress name: bleater-ui
-#   - namespace: bleater
-#   - WRONG backend service: wrong-service
-#   - WRONG backend port: 80
-#   - WRONG TLS secret: wrong-secret
+# It intentionally creates a MISCONFIGURED ("drifted") ingress resource.
 #
-# Expected Agent Fix:
-#   - service  -> bleater-minio
-#   - port     -> 9001
-#   - tls      -> bleater-minio-tls
-#   - host remains: minio.devops.local
+# INITIAL DRIFTED STATE
+# ---------------------
+# Resource:
+#   ingress: bleater-ui
+#   namespace: bleater
 #
-# This ensures the task starts in a broken configuration
-# which the agent must repair.
+# Incorrect values created intentionally:
+#
+#   Backend Service Name : wrong-service
+#   Backend Service Port : 80
+#   TLS Secret           : wrong-secret
+#
+# Correct values expected AFTER agent fixes:
+#
+#   Backend Service Name : bleater-minio
+#   Backend Service Port : 9001
+#   TLS Secret           : bleater-minio-tls
+#   Host                 : minio.devops.local (UNCHANGED)
+#
+# TASK REQUIREMENT
+# ----------------
+# Agent must MODIFY the existing ingress resource.
+# Agent must NOT delete or recreate resources.
+#
 ###############################################################################
 
-echo "Creating drifted MinIO ingress..."
-
+echo "Creating namespace..."
 kubectl create namespace bleater --dry-run=client -o yaml | kubectl apply -f -
+
+echo "Creating drifted ingress..."
 
 cat <<EOF | kubectl apply -f -
 apiVersion: networking.k8s.io/v1
@@ -52,4 +66,4 @@ spec:
               number: 80
 EOF
 
-echo "Drifted ingress created."
+echo "Drifted ingress created successfully."
