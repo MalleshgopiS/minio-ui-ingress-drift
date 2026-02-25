@@ -1,20 +1,40 @@
-id: minio-ui-ingress-drift
+name: minio-ui-ingress-drift
 
-prompt: |
-  The MinIO UI ingress named `bleater-ui` in the `bleater`
-  namespace has configuration drift.
+description: |
+  A configuration drift has occurred in the Kubernetes Ingress resource
+  `bleater-ui` inside the `bleater` namespace.
 
-  Fix the ingress so that:
+  The ingress is intended to expose the MinIO UI but currently routes
+  traffic incorrectly due to drifted configuration.
 
-  - Backend service name is `bleater-minio`
-  - Backend service port is `9001`
-  - TLS secret is `bleater-minio-tls`
-  - Host remains `minio.devops.local`
+  Your task is to repair the existing ingress configuration.
 
-  Only modify the existing ingress resource.
-  Do NOT create new resources.
-  Do NOT use interactive commands.
+  REQUIRED FIXES:
 
-metadata:
-  category: kubernetes
-  difficulty: easy
+  - Backend service name must be: bleater-minio
+  - Backend service port must be: 9001
+  - TLS secret must be: bleater-minio-tls
+  - Host must remain: minio.devops.local
+
+  CONSTRAINTS:
+
+  - Only MODIFY the existing ingress resource.
+  - DO NOT delete or recreate the ingress.
+  - DO NOT create new ingress resources.
+  - DO NOT use interactive commands.
+  - The ingress resource UID must remain unchanged
+    (the grader verifies the resource was modified in-place).
+
+  ENVIRONMENT SETUP:
+
+  The environment is initialized automatically via setup.sh before
+  execution begins. Setup creates a drifted ingress configuration
+  and records the original ingress UID for validation.
+
+difficulty: easy
+
+tags:
+  - kubernetes
+  - ingress
+  - devops
+  - debugging
