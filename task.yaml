@@ -22,14 +22,14 @@ description: |
   - DO NOT delete or recreate the ingress.
   - DO NOT create new ingress resources.
   - DO NOT use interactive commands.
-  - The ingress resource UID must remain unchanged
-    (the grader verifies the resource was modified in-place).
+  - The ingress resource must be modified in-place.
+    Deleting and recreating the resource is not allowed.
 
   ENVIRONMENT SETUP:
 
-  The environment is initialized automatically via setup.sh before
-  execution begins. Setup creates a drifted ingress configuration
-  and records the original ingress UID for validation.
+  The environment is initialized automatically before execution.
+  A drifted ingress configuration is created and the original
+  resource identity is preserved for validation.
 
 difficulty: easy
 
