@@ -7,15 +7,17 @@ echo "========================================"
 
 NAMESPACE="bleater"
 
-# --------------------------------------------------
-# Namespace
-# --------------------------------------------------
-kubectl get ns ${NAMESPACE} >/dev/null 2>&1 || kubectl create ns ${NAMESPACE}
+# ------------------------------------------------
+# Create namespace
+# ------------------------------------------------
+kubectl get namespace ${NAMESPACE} >/dev/null 2>&1 || \
+kubectl create namespace ${NAMESPACE}
+
 echo "Namespace ready: ${NAMESPACE}"
 
-# --------------------------------------------------
-# Dummy backend service (WRONG service)
-# --------------------------------------------------
+# ------------------------------------------------
+# Create WRONG backend service (drift)
+# ------------------------------------------------
 kubectl apply -n ${NAMESPACE} -f - <<EOF
 apiVersion: v1
 kind: Service
@@ -31,9 +33,10 @@ EOF
 
 echo "Dummy service created"
 
-# --------------------------------------------------
-# Generate TLS certs (NEBULA SAFE)
-# --------------------------------------------------
+# ------------------------------------------------
+# Create WRONG TLS secret (drift)
+# (generate self-signed cert dynamically)
+# ------------------------------------------------
 TMP_DIR=$(mktemp -d)
 
 openssl req -x509 -nodes -days 365 \
@@ -42,18 +45,17 @@ openssl req -x509 -nodes -days 365 \
   -out ${TMP_DIR}/tls.crt \
   -subj "/CN=minio.devops.local"
 
-kubectl delete secret wrong-secret -n ${NAMESPACE} --ignore-not-found
-
 kubectl create secret tls wrong-secret \
   --cert=${TMP_DIR}/tls.crt \
   --key=${TMP_DIR}/tls.key \
-  -n ${NAMESPACE}
+  -n ${NAMESPACE} \
+  --dry-run=client -o yaml | kubectl apply -f -
 
 echo "Dummy TLS secret created"
 
-# --------------------------------------------------
+# ------------------------------------------------
 # Create DRIFTED ingress
-# --------------------------------------------------
+# ------------------------------------------------
 kubectl apply -n ${NAMESPACE} -f - <<EOF
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -61,33 +63,54 @@ metadata:
   name: bleater-ui
 spec:
   tls:
-  - hosts:
-    - minio.devops.local
-    secretName: wrong-secret
+    - hosts:
+        - minio.devops.local
+      secretName: wrong-secret
   rules:
-  - host: minio.devops.local
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: wrong-service
-            port:
-              number: 80
+    - host: minio.devops.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: wrong-service
+                port:
+                  number: 80
 EOF
 
 echo "Drifted ingress created"
 
-# --------------------------------------------------
-# Save ORIGINAL UID (ANTI-CHEAT)
-# --------------------------------------------------
-UID=$(kubectl get ingress bleater-ui -n ${NAMESPACE} -o jsonpath='{.metadata.uid}')
+# ------------------------------------------------
+# Wait until ingress exists
+# ------------------------------------------------
+echo "Waiting for ingress readiness..."
 
-echo "${UID}" > /tmp/bleater-ui-original-uid
+for i in {1..30}; do
+  if kubectl get ingress bleater-ui -n ${NAMESPACE} >/dev/null 2>&1; then
+    break
+  fi
+  sleep 2
+done
 
-echo "Original UID stored"
+# ------------------------------------------------
+# Capture ORIGINAL UID (ANTI-CHEAT)
+# IMPORTANT: DO NOT USE VARIABLE NAME UID
+# ------------------------------------------------
+INGRESS_UID=$(kubectl get ingress bleater-ui \
+  -n ${NAMESPACE} \
+  -o jsonpath='{.metadata.uid}')
+
+echo "${INGRESS_UID}" > /tmp/bleater-ui-original-uid
+
+echo "Original ingress UID saved:"
+cat /tmp/bleater-ui-original-uid
+
+# ------------------------------------------------
+# Cleanup temp cert files
+# ------------------------------------------------
+rm -rf ${TMP_DIR}
 
 echo "========================================"
-echo "Setup complete"
+echo "Setup completed successfully"
 echo "========================================"
